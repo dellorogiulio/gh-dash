@@ -28,6 +28,12 @@ type IssueData struct {
 	Comments          IssueComments  `graphql:"comments(last: 15)"`
 	Reactions         IssueReactions `graphql:"reactions(first: 1)"`
 	Labels            IssueLabels    `graphql:"labels(first: 20)"`
+	SubIssuesSummary  SubIssuesSummary
+}
+
+type SubIssuesSummary struct {
+	Total     int
+	Completed int
 }
 
 type IssueComments struct {

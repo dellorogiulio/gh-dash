@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/table"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
@@ -97,17 +96,48 @@ func (issue *Issue) renderExtendedTitle(isSelected bool) string {
 	number := baseStyle.Foreground(numberFg).Render(fmt.Sprintf("#%d ", issue.Data.Number))
 	title := issue.getTextStyle().Inherit(baseStyle).Bold(true).Render(issue.Data.Title)
 
-	width := issue.titleWidth() - 1
+	width := issue.titleWidth() - 2
+	subIssues := issue.renderSubIssuesProgress(baseStyle)
 	firstLine := lipgloss.JoinHorizontal(lipgloss.Top, number, title)
 	if width > 0 {
-		firstLine = ansi.Truncate(firstLine, width, constants.Ellipsis)
+		firstLine = ansi.Truncate(firstLine, width-lipgloss.Width(subIssues), constants.Ellipsis)
 	}
+	firstLine += subIssues
+	// Need to remove the last reset to prevent the selected row background from stopping.
+	firstLine = utils.RemoveLastReset(firstLine)
 
 	labels := issue.renderLabels(isSelected, width)
 	if labels == "" {
 		return firstLine
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, firstLine, labels)
+}
+
+func (issue *Issue) renderSubIssuesProgress(baseStyle lipgloss.Style) string {
+	summary := issue.Data.SubIssuesSummary
+	if summary.Total == 0 {
+		return ""
+	}
+
+	icon := baseStyle.Foreground(lipgloss.Color("#a371f7")).Render(progressIcon(summary.Completed, summary.Total))
+	count := baseStyle.Foreground(issue.Ctx.Theme.SecondaryText).
+		Render(fmt.Sprintf(" %d/%d", summary.Completed, summary.Total))
+	return baseStyle.Render("  ") + icon + count
+}
+
+func progressIcon(completed, total int) string {
+	switch ratio := float64(completed) / float64(total); {
+	case ratio >= 1:
+		return "●"
+	case ratio >= 0.625:
+		return "◕"
+	case ratio >= 0.375:
+		return "◑"
+	case ratio > 0:
+		return "◔"
+	default:
+		return "○"
+	}
 }
 
 func (issue *Issue) titleWidth() int {
@@ -120,28 +150,43 @@ func (issue *Issue) titleWidth() int {
 }
 
 func (issue *Issue) renderLabels(isSelected bool, width int) string {
-	if len(issue.Data.Labels.Nodes) == 0 || width <= 2 {
+	labels := issue.Data.Labels.Nodes
+	if len(labels) == 0 || width <= 2 {
 		return ""
 	}
 
-	pillStyle := issue.Ctx.Styles.PrView.PillStyle
-	rowStyle := lipgloss.NewStyle()
+	baseStyle := lipgloss.NewStyle()
 	if isSelected {
-		rowStyle = rowStyle.Background(issue.Ctx.Theme.SelectedBackground)
-		pillStyle = pillStyle.
-			BorderLeftBackground(issue.Ctx.Theme.SelectedBackground).
-			BorderRightBackground(issue.Ctx.Theme.SelectedBackground)
+		baseStyle = baseStyle.Background(issue.Ctx.Theme.SelectedBackground)
+	}
+	nameStyle := baseStyle.Foreground(issue.Ctx.Theme.FaintText)
+	separator := baseStyle.Render("  ")
+
+	rendered := make([]string, 0, len(labels))
+	usedWidth := 0
+	for i, label := range labels {
+		dot := baseStyle.Foreground(lipgloss.Color("#" + label.Color)).Render("●")
+		item := dot + nameStyle.Render(" "+label.Name)
+		itemWidth := lipgloss.Width(item)
+		if usedWidth > 0 {
+			itemWidth += lipgloss.Width(separator)
+		}
+
+		remaining := len(labels) - i - 1
+		overflowWidth := 0
+		if remaining > 0 {
+			overflowWidth = lipgloss.Width(separator) + lipgloss.Width(fmt.Sprintf("+%d", remaining))
+		}
+		if usedWidth+itemWidth+overflowWidth > width && usedWidth > 0 {
+			rendered = append(rendered, nameStyle.Render(fmt.Sprintf("+%d", len(labels)-i)))
+			break
+		}
+
+		rendered = append(rendered, item)
+		usedWidth += itemWidth
 	}
 
-	return common.RenderLabels(
-		issue.Data.Labels.Nodes,
-		common.LabelOpts{
-			Width:     width,
-			MaxRows:   1,
-			PillStyle: pillStyle,
-			RowStyle:  rowStyle,
-		},
-	)
+	return ansi.Truncate(strings.Join(rendered, separator), width, constants.Ellipsis)
 }
 
 func (issue *Issue) renderOpenedBy() string {
