@@ -176,6 +176,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 
 	table, tableCmd := m.Table.Update(msg)
 	m.Table = table
+	m.Table.SetRows(m.BuildRows())
 
 	return m, tea.Batch(cmd, searchCmd, promptCmd, tableCmd)
 }
@@ -263,9 +264,15 @@ func GetSectionColumns(
 
 func (m Model) BuildRows() []table.Row {
 	var rows []table.Row
-	for _, currIssue := range m.Issues {
-		issueModel := issuerow.Issue{Ctx: m.Ctx, Data: currIssue, ShowAuthorIcon: m.ShowAuthorIcon}
-		rows = append(rows, issueModel.ToTableRow())
+	currItem := m.Table.GetCurrItem()
+	for i, currIssue := range m.Issues {
+		issueModel := issuerow.Issue{
+			Ctx:            m.Ctx,
+			Data:           currIssue,
+			ShowAuthorIcon: m.ShowAuthorIcon,
+			Columns:        m.Table.Columns,
+		}
+		rows = append(rows, issueModel.ToTableRow(currItem == i))
 	}
 
 	if rows == nil {
