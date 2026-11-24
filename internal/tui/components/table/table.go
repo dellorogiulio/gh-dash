@@ -154,11 +154,13 @@ func (m *Model) LastItem() int {
 
 func (m *Model) cacheColumnWidths() {
 	columns := m.renderHeaderColumns()
-	for i, col := range columns {
+	shownIdx := 0
+	for i := range m.Columns {
 		if m.Columns[i].Hidden != nil && *m.Columns[i].Hidden {
 			continue
 		}
-		m.Columns[i].ComputedWidth = lipgloss.Width(col)
+		m.Columns[i].ComputedWidth = lipgloss.Width(columns[shownIdx])
+		shownIdx++
 	}
 }
 
