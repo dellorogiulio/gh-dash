@@ -110,7 +110,7 @@ func (issue *Issue) renderExtendedTitle(isSelected bool) string {
 	if labels == "" {
 		return firstLine
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, firstLine, labels)
+	return firstLine + "\n" + labels
 }
 
 func (issue *Issue) renderSubIssuesProgress(baseStyle lipgloss.Style) string {
