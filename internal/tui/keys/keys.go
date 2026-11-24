@@ -10,23 +10,6 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 )
 
-// NotificationSubjectType indicates what type of content is being viewed in the notifications view
-type NotificationSubjectType int
-
-const (
-	NotificationSubjectNone NotificationSubjectType = iota
-	NotificationSubjectPR
-	NotificationSubjectIssue
-)
-
-// notificationSubject tracks the current notification subject type for help display
-var notificationSubject NotificationSubjectType
-
-// SetNotificationSubject sets the current notification subject type for help display
-func SetNotificationSubject(subjectType NotificationSubjectType) {
-	notificationSubject = subjectType
-}
-
 type KeyMap struct {
 	viewType              config.ViewType
 	Up                    key.Binding
@@ -77,18 +60,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	case config.RepoView:
 		additionalKeys = BranchFullHelp()
 		customKeys = append(customKeys, CustomBranchBindings...)
-	case config.NotificationsView:
-		additionalKeys = NotificationFullHelp()
-		customKeys = append(customKeys, CustomNotificationBindings...)
-		// Include PR or Issue keys when viewing that subject type
-		switch notificationSubject {
-		case NotificationSubjectPR:
-			additionalKeys = append(additionalKeys, PRFullHelp()...)
-			customKeys = append(customKeys, CustomPRBindings...)
-		case NotificationSubjectIssue:
-			additionalKeys = append(additionalKeys, IssueFullHelp()...)
-			customKeys = append(customKeys, CustomIssueBindings...)
-		}
 	default:
 		additionalKeys = IssueFullHelp()
 		customKeys = append(customKeys, CustomIssueBindings...)
@@ -230,7 +201,7 @@ var Keys = &KeyMap{
 
 // Rebind will update our saved keybindings from configuration values.
 func Rebind(
-	universal, issueKeys, prKeys, branchKeys, notificationKeys, cmpKeys []config.Keybinding,
+	universal, issueKeys, prKeys, branchKeys, cmpKeys []config.Keybinding,
 ) error {
 	err := rebindUniversal(universal)
 	if err != nil {
@@ -252,22 +223,16 @@ func Rebind(
 		return err
 	}
 
-	err = rebindCmpKeys(cmpKeys)
-	if err != nil {
-		return err
-	}
-
-	return rebindNotificationKeys(notificationKeys)
+	return rebindCmpKeys(cmpKeys)
 }
 
 // CustomBindings stores custom keybindings that don't have built-in equivalents
 var (
-	CustomUniversalBindings    []key.Binding
-	CustomPRBindings           []key.Binding
-	CustomIssueBindings        []key.Binding
-	CustomBranchBindings       []key.Binding
-	CustomNotificationBindings []key.Binding
-	CustomCmpBindings          []key.Binding
+	CustomUniversalBindings []key.Binding
+	CustomPRBindings        []key.Binding
+	CustomIssueBindings     []key.Binding
+	CustomBranchBindings    []key.Binding
+	CustomCmpBindings       []key.Binding
 )
 
 func rebindUniversal(universal []config.Keybinding) error {

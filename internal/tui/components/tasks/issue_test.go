@@ -214,11 +214,6 @@ func TestCloseIssue_SectionIdentifierPropagation(t *testing.T) {
 			sectionId:   1,
 			sectionType: "issue",
 		},
-		{
-			name:        "notification section type",
-			sectionId:   10,
-			sectionType: "notification",
-		},
 	}
 
 	for _, tt := range tests {
@@ -246,11 +241,6 @@ func TestReopenIssue_SectionIdentifierPropagation(t *testing.T) {
 			name:        "issue section type",
 			sectionId:   1,
 			sectionType: "issue",
-		},
-		{
-			name:        "notification section type",
-			sectionId:   10,
-			sectionType: "notification",
 		},
 	}
 

@@ -90,7 +90,7 @@ export function GET() {
           description:
             "Specifies which dashboard view should be displayed on load.",
           type: "string",
-          enum: ["notifications", "issues", "prs"],
+          enum: ["issues", "prs"],
           default: "prs",
         },
         prApproveComment: {

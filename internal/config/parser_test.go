@@ -127,7 +127,7 @@ func TestParser(t *testing.T) {
 		assert.Empty(t, cmp.Diff(expected, actual, keybindSorter))
 	})
 
-	t.Run("Should accept notifications as the default view", func(t *testing.T) {
+	t.Run("Should fall back to the PRs view for an unknown default view", func(t *testing.T) {
 		dir, err := os.MkdirTemp("", "config")
 		testutils.AssertNoError(t, err)
 		defer os.RemoveAll(dir)
@@ -142,7 +142,7 @@ func TestParser(t *testing.T) {
 		})
 
 		testutils.AssertNoError(t, err)
-		require.Equal(t, NotificationsView, parsed.Defaults.View)
+		require.Equal(t, PRsView, parsed.Defaults.View)
 	})
 
 	t.Run("Should merge global config with passed config", func(t *testing.T) {

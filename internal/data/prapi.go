@@ -443,36 +443,6 @@ func (data PullRequestData) GetCreatedAt() time.Time {
 	return data.CreatedAt
 }
 
-// ToPullRequestData converts EnrichedPullRequestData to PullRequestData
-// This is useful when we fetch a single PR and need basic PR fields
-func (e EnrichedPullRequestData) ToPullRequestData() PullRequestData {
-	return PullRequestData{
-		Number:            e.Number,
-		Title:             e.Title,
-		Author:            e.Author,
-		AuthorAssociation: e.AuthorAssociation,
-		UpdatedAt:         e.UpdatedAt,
-		CreatedAt:         e.CreatedAt,
-		Url:               e.Url,
-		State:             e.State,
-		Mergeable:         e.Mergeable,
-		ReviewDecision:    e.ReviewDecision,
-		Additions:         e.Additions,
-		Deletions:         e.Deletions,
-		HeadRefName:       e.HeadRefName,
-		BaseRefName:       e.BaseRefName,
-		HeadRepository:    e.HeadRepository,
-		HeadRef:           e.HeadRef,
-		Repository:        e.Repository,
-		Assignees:         e.Assignees,
-		IsDraft:           e.IsDraft,
-		Labels:            e.Labels,
-		// Note: Comments, ReviewThreads, Reviews, ReviewRequests, Commits
-		// have different types in EnrichedPullRequestData vs PullRequestData
-		// We leave them as zero values since the enriched data will be used instead
-	}
-}
-
 func makePullRequestsQuery(query string) string {
 	return fmt.Sprintf("is:pr archived:false %s sort:updated", query)
 }

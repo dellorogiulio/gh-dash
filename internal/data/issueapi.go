@@ -2,13 +2,11 @@ package data
 
 import (
 	"fmt"
-	"net/url"
 	"time"
 
 	"charm.land/log/v2"
 	gh "github.com/cli/go-gh/v2/pkg/api"
 	graphql "github.com/cli/shurcooL-graphql"
-	"github.com/shurcooL/githubv4"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/theme"
 )
@@ -150,36 +148,4 @@ type IssuesResponse struct {
 	Issues     []IssueData
 	TotalCount int
 	PageInfo   PageInfo
-}
-
-// FetchIssue fetches a single issue by its GitHub URL
-func FetchIssue(issueUrl string) (IssueData, error) {
-	var err error
-	if client == nil {
-		client, err = gh.DefaultGraphQLClient()
-		if err != nil {
-			return IssueData{}, err
-		}
-	}
-
-	var queryResult struct {
-		Resource struct {
-			Issue IssueData `graphql:"... on Issue"`
-		} `graphql:"resource(url: $url)"`
-	}
-	parsedUrl, err := url.Parse(issueUrl)
-	if err != nil {
-		return IssueData{}, err
-	}
-	variables := map[string]any{
-		"url": githubv4.URI{URL: parsedUrl},
-	}
-	log.Debug("Fetching Issue", "url", issueUrl)
-	err = client.Query("FetchIssue", &queryResult, variables)
-	if err != nil {
-		return IssueData{}, err
-	}
-	log.Info("Successfully fetched Issue", "url", issueUrl)
-
-	return queryResult.Resource.Issue, nil
 }

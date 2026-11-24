@@ -172,53 +172,6 @@ The following built-in issue commands can be overridden with custom keybinds:
 
 See [issue keys](../../getting-started/keybindings/selected-issue/) for more details.
 
-## Notification Keybindings
-
-Define any number of keybindings for the notifications view or override existing ones.
-
-For example:
-
-```yaml
-keybindings:
-  notifications:
-    - key: d
-      builtin: markAsDone
-    - key: D
-      builtin: markAllAsDone
-```
-
-### Available Command Arguments
-
-The command template receives different fields depending on whether the sidebar has been opened:
-
-| State            | PR template fields                       |
-| ---------------- | ---------------------------------------- |
-| Sidebar not open | `RepoName`, `PrNumber`, `RepoPath`       |
-| Sidebar open     | + `HeadRefName`, `BaseRefName`, `Author` |
-
-| State            | Issue template fields                 |
-| ---------------- | ------------------------------------- |
-| Sidebar not open | `RepoName`, `IssueNumber`, `RepoPath` |
-| Sidebar open     | + `Author`                            |
-
-If a template references a sidebar-only field (e.g., `{{.HeadRefName}}`) before the sidebar is opened, the template engine’s `missingkey=error` option produces an error message. This is intentional — users should open the notification first to populate the full data.
-
-### Built-in Commands
-
-The following built-in notifications commands can be overridden with custom keybinds:
-
-| Command          | Description                                        |
-| ---------------- | -------------------------------------------------- |
-| `view`           | view notification (fetches content, marks as read) |
-| `markAsDone`     | mark as done (removes from inbox)                  |
-| `markAllAsDone`  | mark all as done                                   |
-| `markAsRead`     | mark as read                                       |
-| `markAllAsRead`  | mark all as read                                   |
-| `unsubscribe`    | unsubscribe from thread                            |
-| `toggleBookmark` | toggle bookmark                                    |
-
-See [notification keys](../../getting-started/keybindings/selected-notification/) for more details.
-
 [ultraviolet-key-strings]: https://github.com/charmbracelet/ultraviolet/blob/main/key.go#L612
 
 ## Completions Keybindings

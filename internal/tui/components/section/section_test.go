@@ -437,12 +437,6 @@ func TestGetPromptConfirmation(t *testing.T) {
 		wantNonEmpty bool
 	}{
 		{
-			name:         "done_all in notifications view shows confirmation",
-			action:       "done_all",
-			view:         config.NotificationsView,
-			wantNonEmpty: true,
-		},
-		{
 			name:         "close in PRs view shows confirmation",
 			action:       "close",
 			view:         config.PRsView,

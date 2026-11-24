@@ -523,8 +523,6 @@ func (m *BaseModel) GetPromptConfirmation() string {
 			prompt = "Enter branch name: "
 		case m.PromptConfirmationAction == "create_pr" && m.Ctx.View == config.RepoView:
 			prompt = "Enter PR title: "
-		case m.PromptConfirmationAction == "done_all" && m.Ctx.View == config.NotificationsView:
-			prompt = "Are you sure you want to mark all as done? (y/N) "
 		}
 
 		m.PromptConfirmationBox.SetPrompt(prompt)

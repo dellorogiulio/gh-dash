@@ -32,9 +32,6 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/footer"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuessection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issueview"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/notificationrow"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/notificationssection"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/notificationview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prssection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prview"
@@ -42,7 +39,6 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/sidebar"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tabs"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
@@ -56,13 +52,11 @@ type Model struct {
 	prView           prview.Model
 	issueSidebar     issueview.Model
 	branchSidebar    branchsidebar.Model
-	notificationView notificationview.Model
 	currSectionId    int
 	footer           footer.Model
 	repo             section.Section
 	prs              []section.Section
 	issues           []section.Section
-	notifications    []section.Section
 	tabs             tabs.Model
 	ctx              *context.ProgramContext
 	taskSpinner      spinner.Model
@@ -119,7 +113,6 @@ func NewModel(location config.Location, repos Repositories) Model {
 	m.prView = prview.NewModel(m.ctx)
 	m.issueSidebar = issueview.NewModel(m.ctx)
 	m.branchSidebar = branchsidebar.NewModel(m.ctx)
-	m.notificationView = notificationview.NewModel(m.ctx)
 	m.tabs = tabs.NewModel(m.ctx)
 
 	return m
@@ -173,7 +166,6 @@ func (m *Model) initScreen() tea.Msg {
 		cfg.Keybindings.Issues,
 		cfg.Keybindings.Prs,
 		cfg.Keybindings.Branches,
-		cfg.Keybindings.Notifications,
 		cfg.Keybindings.Cmp,
 	)
 	if err != nil {
@@ -227,17 +219,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		} else if m.footer.ShowConfirmQuit {
 			m.footer.SetShowConfirmQuit(false)
-			return m, nil
-		}
-
-		// Handle notification PR/Issue action confirmation
-		if m.notificationView.HasPendingAction() {
-			var action string
-			m.notificationView, action = m.notificationView.Update(msg)
-			m.footer.SetLeftSection("")
-			if action != "" {
-				return m, m.executeNotificationAction(action)
-			}
 			return m, nil
 		}
 
@@ -533,167 +514,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, keys.IssueKeys.ViewPRs):
 				cmds = append(cmds, m.switchSelectedView())
 			}
-		case m.ctx.View == config.NotificationsView:
-			switch {
-			case key.Matches(msg, m.keys.OpenGithub):
-				cmds = append(cmds, m.openBrowser())
-				return m, tea.Batch(cmds...)
-
-			// Handle Enter to (re)load notification content - check before subject handlers
-			// so Enter always works, even after viewing a notification
-			case key.Matches(msg, keys.NotificationKeys.View):
-				cmds = append(cmds, m.loadNotificationContent())
-
-			// Return from PR/Issue detail back to the default notification prompt
-			case key.Matches(msg, keys.NotificationKeys.BackToNotification):
-				return m, m.backToNotification()
-
-			// PR keybindings when viewing a PR notification
-			case m.notificationView.GetSubjectPR() != nil:
-				// Check for PR actions first (before updating prView)
-				if !m.prView.IsTextInputBoxFocused() {
-					action := prview.MsgToAction(msg)
-					if action != nil {
-						switch action.Type {
-						case prview.PRActionApprove:
-							return m, m.openSidebarForPRInput(m.prView.SetIsApproving)
-
-						case prview.PRActionAssign:
-							return m, m.openSidebarForPRInput(m.prView.SetIsAssigning)
-
-						case prview.PRActionUnassign:
-							return m, m.openSidebarForPRInput(m.prView.SetIsUnassigning)
-
-						case prview.PRActionLabel:
-							return m, m.openSidebarForPRInput(m.prView.SetIsLabeling)
-
-						case prview.PRActionComment:
-							return m, m.openSidebarForPRInput(m.prView.SetIsCommenting)
-
-						case prview.PRActionDiff:
-							if pr := m.notificationView.GetSubjectPR(); pr != nil {
-								cmd = common.DiffPR(pr.GetNumber(), pr.GetRepoNameWithOwner(),
-									m.ctx.Config.GetFullScreenDiffPagerEnv())
-							}
-							return m, cmd
-
-						case prview.PRActionCheckout:
-							if pr := m.notificationView.GetSubjectPR(); pr != nil {
-								cmd, _ = notificationssection.CheckoutPR(
-									m.ctx, pr.GetNumber(), pr.GetRepoNameWithOwner())
-							}
-							return m, cmd
-
-						case prview.PRActionClose:
-							cmd = m.promptConfirmationForNotificationPR("close")
-							return m, cmd
-
-						case prview.PRActionReady:
-							cmd = m.promptConfirmationForNotificationPR("ready")
-							return m, cmd
-
-						case prview.PRActionReopen:
-							cmd = m.promptConfirmationForNotificationPR("reopen")
-							return m, cmd
-
-						case prview.PRActionMerge:
-							cmd = m.promptConfirmationForNotificationPR("merge")
-							return m, cmd
-
-						case prview.PRActionUpdate:
-							cmd = m.promptConfirmationForNotificationPR("update")
-							return m, cmd
-
-						case prview.PRActionApproveWorkflows:
-							cmd = m.promptConfirmationForNotificationPR("approveWorkflows")
-							return m, cmd
-
-						case prview.PRActionSummaryViewMore:
-							m.prView.SetSummaryViewMore()
-							m.syncSidebar()
-							return m, nil
-						}
-					}
-				}
-
-				// Handle 's' key to switch views
-				if key.Matches(msg, keys.PRKeys.ViewIssues) {
-					cmds = append(cmds, m.switchSelectedView())
-				}
-
-				// No action matched - update prView for navigation (tab switching, scrolling)
-				var prCmd tea.Cmd
-				m.prView, prCmd = m.prView.Update(msg)
-				m.syncSidebar()
-				cmds = append(cmds, prCmd)
-
-			// Issue keybindings when viewing an Issue notification
-			case m.notificationView.GetSubjectIssue() != nil:
-				var issueCmd tea.Cmd
-				var action *issueview.IssueAction
-				m.issueSidebar, issueCmd, action = m.issueSidebar.Update(msg)
-
-				if action != nil {
-					switch action.Type {
-					case issueview.IssueActionLabel:
-						return m, m.openSidebarForInput(m.issueSidebar.SetIsLabeling)
-
-					case issueview.IssueActionAssign:
-						return m, m.openSidebarForInput(m.issueSidebar.SetIsAssigning)
-
-					case issueview.IssueActionUnassign:
-						return m, m.openSidebarForInput(m.issueSidebar.SetIsUnassigning)
-
-					case issueview.IssueActionComment:
-						return m, m.openSidebarForInput(m.issueSidebar.SetIsCommenting)
-
-					case issueview.IssueActionCheckout:
-						cmd, err := m.issueSidebar.Checkout()
-						if err != nil {
-							m.ctx.Error = err
-						}
-						return m, cmd
-
-					case issueview.IssueActionClose:
-						cmd = m.promptConfirmationForNotificationIssue("close")
-						return m, cmd
-
-					case issueview.IssueActionReopen:
-						cmd = m.promptConfirmationForNotificationIssue("reopen")
-						return m, cmd
-					}
-				}
-
-				// Handle 's' key to switch views
-				if key.Matches(msg, keys.IssueKeys.ViewPRs) {
-					cmds = append(cmds, m.switchSelectedView())
-				}
-
-				// Sync sidebar and return issueCmd for navigation
-				m.syncSidebar()
-				cmds = append(cmds, issueCmd)
-
-			case key.Matches(msg, keys.NotificationKeys.MarkAsDone):
-				cmds = append(
-					cmds,
-					m.updateSection(currSection.GetId(), currSection.GetType(), msg),
-				)
-
-			case key.Matches(msg, keys.NotificationKeys.MarkAllAsDone):
-				cmd = m.promptConfirmation(currSection, "done_all")
-				return m, cmd
-
-			case key.Matches(msg, keys.NotificationKeys.Open):
-				cmd = m.updateSection(currSection.GetId(), currSection.GetType(), msg)
-				return m, cmd
-
-			case key.Matches(msg, keys.NotificationKeys.SortByRepo):
-				cmd = m.updateSection(currSection.GetId(), currSection.GetType(), msg)
-				return m, cmd
-
-			case key.Matches(msg, keys.PRKeys.ViewIssues):
-				cmds = append(cmds, m.switchSelectedView())
-			}
 		}
 
 	case initMsg:
@@ -772,64 +592,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			log.Error("failed enriching pr", "err", msg.Err)
 		}
-
-	case notificationPRFetchedMsg:
-		if msg.Err == nil {
-			// Convert enriched PR to prrow.Data for display
-			prData := msg.PR.ToPullRequestData()
-			m.notificationView.SetSubjectPR(&prrow.Data{
-				Primary:    &prData,
-				Enriched:   msg.PR,
-				IsEnriched: true,
-			}, msg.NotificationId)
-			keys.SetNotificationSubject(keys.NotificationSubjectPR)
-			// Update sidebar with PR view
-			width := m.sidebar.GetSidebarContentWidth()
-			m.prView.SetSectionId(0)
-			m.prView.SetRow(m.notificationView.GetSubjectPR())
-			m.prView.SetWidth(width)
-			m.prView.SetEnrichedPR(msg.PR)
-			// Switch to Activity tab and scroll to bottom if there's a latest comment
-			// (indicates there's new activity to show)
-			if msg.LatestCommentUrl != "" {
-				m.prView.GoToActivityTab()
-				m.sidebar.SetContent(m.prView.View())
-				m.sidebar.ScrollToBottom()
-			} else {
-				// For notifications without comments (new PRs, state changes, etc.)
-				// show the Overview tab without scrolling
-				m.prView.GoToFirstTab()
-				m.sidebar.SetContent(m.prView.View())
-			}
-			m.markNotificationAsRead(msg.NotificationId)
-		} else {
-			log.Error("failed fetching notification PR", "err", msg.Err)
-		}
-
-	case notificationIssueFetchedMsg:
-		if msg.Err == nil {
-			m.notificationView.SetSubjectIssue(&msg.Issue, msg.NotificationId)
-			keys.SetNotificationSubject(keys.NotificationSubjectIssue)
-			// Update sidebar with Issue view
-			width := m.sidebar.GetSidebarContentWidth()
-			m.issueSidebar.SetSectionId(0)
-			m.issueSidebar.SetRow(m.notificationView.GetSubjectIssue())
-			m.issueSidebar.SetWidth(width)
-			m.sidebar.SetContent(m.issueSidebar.View())
-			// Scroll to bottom if there's a latest comment (indicates new activity)
-			if msg.LatestCommentUrl != "" {
-				m.sidebar.ScrollToBottom()
-			}
-			m.markNotificationAsRead(msg.NotificationId)
-		} else {
-			log.Error("failed fetching notification Issue", "err", msg.Err)
-		}
-
-	case notificationssection.UpdateNotificationReadStateMsg:
-		m.updateNotificationSections(msg)
-
-	case notificationssection.UpdateNotificationCommentsMsg:
-		cmds = append(cmds, m.updateNotificationSections(msg))
 
 	case spinner.TickMsg:
 		if len(m.tasks) > 0 {
@@ -1044,44 +806,9 @@ type initMsg struct {
 	RepoUrl string
 }
 
-// Message types for notification subject fetching
-type notificationPRFetchedMsg struct {
-	NotificationId   string
-	PR               data.EnrichedPullRequestData
-	LatestCommentUrl string
-	Err              error
-}
-
-type notificationIssueFetchedMsg struct {
-	NotificationId   string
-	Issue            data.IssueData
-	LatestCommentUrl string
-	Err              error
-}
-
 func (m *Model) setCurrSectionId(newSectionId int) {
 	m.currSectionId = newSectionId
 	m.tabs.SetCurrSectionId(newSectionId)
-}
-
-func (m *Model) updateNotificationSections(msg tea.Msg) tea.Cmd {
-	var cmds []tea.Cmd
-	for i := range m.notifications {
-		if m.notifications[i] != nil {
-			var cmd tea.Cmd
-			m.notifications[i], cmd = m.notifications[i].Update(msg)
-			cmds = append(cmds, cmd)
-		}
-	}
-	return tea.Batch(cmds...)
-}
-
-func (m *Model) markNotificationAsRead(notificationId string) {
-	readStateMsg := notificationssection.UpdateNotificationReadStateMsg{
-		Id:     notificationId,
-		Unread: false,
-	}
-	m.updateNotificationSections(readStateMsg)
 }
 
 func (m *Model) onViewedRowChanged() tea.Cmd {
@@ -1090,8 +817,6 @@ func (m *Model) onViewedRowChanged() tea.Cmd {
 	sidebarCmd := m.syncSidebar()
 	enrichCmd := m.prView.EnrichCurrRow()
 	m.sidebar.ScrollToTop()
-	m.notificationView.ResetSubject()
-	keys.SetNotificationSubject(keys.NotificationSubjectNone)
 	return tea.Batch(sidebarCmd, enrichCmd)
 }
 
@@ -1120,7 +845,6 @@ func (m *Model) syncProgramContext() {
 	m.prView.UpdateProgramContext(m.ctx)
 	m.issueSidebar.UpdateProgramContext(m.ctx)
 	m.branchSidebar.UpdateProgramContext(m.ctx)
-	m.notificationView.UpdateProgramContext(m.ctx)
 }
 
 func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
@@ -1128,11 +852,6 @@ func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
 	switch sType {
 	case reposection.SectionType:
 		m.repo, cmd = m.repo.Update(msg)
-
-	case notificationssection.SectionType:
-		if id < len(m.notifications) && m.notifications[id] != nil {
-			m.notifications[id], cmd = m.notifications[id].Update(msg)
-		}
 
 	case prssection.SectionType:
 		updatedSection, cmd = m.prs[id].Update(msg)
@@ -1257,17 +976,6 @@ func (m *Model) openSidebarForInput(setFunc func(bool) tea.Cmd) tea.Cmd {
 	return cmd
 }
 
-func (m *Model) backToNotification() tea.Cmd {
-	if m.notificationView.GetSubjectPR() == nil && m.notificationView.GetSubjectIssue() == nil {
-		return nil
-	}
-
-	m.notificationView.ClearSubject()
-	keys.SetNotificationSubject(keys.NotificationSubjectNone)
-	m.sidebar.ScrollToTop()
-	return m.syncSidebar()
-}
-
 func (m *Model) promptConfirmation(currSection section.Section, action string) tea.Cmd {
 	if currSection != nil {
 		currSection.SetPromptConfirmationAction(action)
@@ -1312,218 +1020,9 @@ func (m *Model) syncSidebar() tea.Cmd {
 		if m.issueSidebar.IsTextInputBoxFocused() {
 			m.sidebar.ScrollToBottom()
 		}
-	case *notificationrow.Data:
-		notifId := row.GetId()
-
-		// Check if we already have cached data for this notification (user already viewed it)
-		if m.notificationView.GetSubjectId() == notifId {
-			// Use cached data
-			if m.notificationView.GetSubjectPR() != nil {
-				m.prView.SetSectionId(0)
-				m.prView.SetRow(m.notificationView.GetSubjectPR())
-				m.prView.SetWidth(width)
-				m.sidebar.SetContent(m.prView.View())
-				// Scroll to bottom if in input mode to keep inputbox visible
-				if m.prView.IsTextInputBoxFocused() {
-					m.sidebar.ScrollToBottom()
-				}
-			} else if m.notificationView.GetSubjectIssue() != nil {
-				m.issueSidebar.SetSectionId(0)
-				m.issueSidebar.SetRow(m.notificationView.GetSubjectIssue())
-				m.issueSidebar.SetWidth(width)
-				m.sidebar.SetContent(m.issueSidebar.View())
-				// Scroll to bottom if in input mode to keep inputbox visible
-				if m.issueSidebar.IsTextInputBoxFocused() {
-					m.sidebar.ScrollToBottom()
-				}
-			}
-			return nil
-		}
-
-		// Clear cached subject when navigating to a different notification
-		// so key dispatch doesn't route keys to the wrong subject's handler.
-		m.notificationView.ClearSubject()
-		keys.SetNotificationSubject(keys.NotificationSubjectNone)
-		// Show prompt to view notification (don't auto-fetch)
-		// User must press Enter to view content and mark as read
-		m.sidebar.SetContent(m.renderNotificationPrompt(row))
 	}
 
 	return cmd
-}
-
-func (m *Model) renderNotificationPrompt(row *notificationrow.Data) string {
-	var content strings.Builder
-
-	subjectType := row.GetSubjectType()
-	leftMargin := "      " // Left margin for content
-
-	// Styles
-	normalText := lipgloss.NewStyle().Foreground(m.ctx.Theme.PrimaryText)
-	faintText := lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText)
-	// Highlighted key style for main prompt (with background)
-	highlightKeyStyle := lipgloss.NewStyle().
-		Foreground(m.ctx.Theme.PrimaryText).
-		Background(m.ctx.Theme.FaintBorder).
-		Padding(0, 1)
-	// Simple key style for table (no background)
-	keyStyle := lipgloss.NewStyle().
-		Foreground(m.ctx.Theme.PrimaryText)
-	actionStyle := lipgloss.NewStyle().Foreground(m.ctx.Theme.SuccessText)
-	headerStyle := lipgloss.NewStyle().
-		Foreground(m.ctx.Theme.PrimaryText).
-		Bold(true)
-
-	// Determine subject type display name and primary action
-	typeName := "PR"
-	enterAction := "view"
-	if subjectType == "Issue" {
-		typeName = "Issue"
-	} else if subjectType != "PullRequest" {
-		typeName = subjectType
-		enterAction = "open in browser"
-	}
-
-	// Main prompt: "Press Enter to view the PR" or "Press Enter to open in browser"
-	content.WriteString("\n")
-	content.WriteString(leftMargin)
-	content.WriteString(normalText.Render("Press "))
-	content.WriteString(highlightKeyStyle.Render("Enter"))
-	if enterAction == "view" {
-		content.WriteString(normalText.Render(fmt.Sprintf(" to %s the %s", enterAction, typeName)))
-	} else {
-		content.WriteString(normalText.Render(fmt.Sprintf(" to %s", enterAction)))
-	}
-	content.WriteString("\n")
-
-	// Note about marking as read
-	content.WriteString(leftMargin)
-	content.WriteString(faintText.Render("(Note: this will mark it as read)"))
-	content.WriteString("\n")
-
-	content.WriteString("\n")
-
-	// Other Actions header
-	content.WriteString(leftMargin)
-	content.WriteString(headerStyle.Render("Other Actions"))
-	content.WriteString("\n\n")
-
-	// Key-action pairs (simple list without borders)
-	actions := []struct {
-		key    string
-		action string
-	}{
-		{"D", "mark as done"},
-		{"m", "mark as read"},
-		{"u", "unsubscribe"},
-		{"b", "toggle bookmark"},
-		{"t", "toggle filtering"},
-		{"S", "sort by repo"},
-		{"o", "open in browser"},
-	}
-
-	keyWidth := 7 // Width for key column
-	for _, a := range actions {
-		content.WriteString(leftMargin)
-		// Right-align the key in its column
-		padding := strings.Repeat(" ", keyWidth-len(a.key))
-		content.WriteString(padding)
-		content.WriteString(keyStyle.Render(a.key))
-		content.WriteString("  ")
-		content.WriteString(actionStyle.Render(a.action))
-		content.WriteString("\n")
-	}
-
-	// Add Enter and Esc at the end
-	content.WriteString(leftMargin)
-	padding := strings.Repeat(" ", keyWidth-len("Enter"))
-	content.WriteString(padding)
-	content.WriteString(keyStyle.Render("Enter"))
-	content.WriteString("  ")
-	content.WriteString(actionStyle.Render(enterAction))
-	content.WriteString("\n")
-	content.WriteString(leftMargin)
-	escPadding := strings.Repeat(" ", keyWidth-len("Esc"))
-	content.WriteString(escPadding)
-	content.WriteString(keyStyle.Render("Esc"))
-	content.WriteString("  ")
-	content.WriteString(actionStyle.Render("go back"))
-
-	return content.String()
-}
-
-// loadNotificationContent fetches and displays notification content, marking it as read
-func (m *Model) loadNotificationContent() tea.Cmd {
-	currRowData := m.getCurrRowData()
-	row, ok := currRowData.(*notificationrow.Data)
-	if !ok || row == nil {
-		return nil
-	}
-
-	notifId := row.GetId()
-	subjectType := row.GetSubjectType()
-	subjectUrl := row.GetUrl()
-	latestCommentUrl := row.GetLatestCommentUrl()
-
-	// Show loading indicator
-	width := m.sidebar.GetSidebarContentWidth()
-	m.notificationView.SetRow(row)
-	m.notificationView.SetWidth(width)
-	m.sidebar.SetContent(m.notificationView.View())
-
-	switch subjectType {
-	case "PullRequest":
-		return tea.Batch(
-			func() tea.Msg {
-				_ = data.MarkNotificationRead(notifId)
-				return notificationssection.UpdateNotificationReadStateMsg{
-					Id:     notifId,
-					Unread: false,
-				}
-			},
-			func() tea.Msg {
-				pr, err := data.FetchPullRequest(subjectUrl)
-				return notificationPRFetchedMsg{
-					NotificationId:   notifId,
-					PR:               pr,
-					LatestCommentUrl: latestCommentUrl,
-					Err:              err,
-				}
-			},
-		)
-	case "Issue":
-		return tea.Batch(
-			func() tea.Msg {
-				_ = data.MarkNotificationRead(notifId)
-				return notificationssection.UpdateNotificationReadStateMsg{
-					Id:     notifId,
-					Unread: false,
-				}
-			},
-			func() tea.Msg {
-				issue, err := data.FetchIssue(subjectUrl)
-				return notificationIssueFetchedMsg{
-					NotificationId:   notifId,
-					Issue:            issue,
-					LatestCommentUrl: latestCommentUrl,
-					Err:              err,
-				}
-			},
-		)
-	default:
-		// For discussions, releases, etc. - mark as read and open in browser
-		// since we can't show rich content for these types
-		return tea.Batch(
-			func() tea.Msg {
-				_ = data.MarkNotificationRead(notifId)
-				return notificationssection.UpdateNotificationReadStateMsg{
-					Id:     notifId,
-					Unread: false,
-				}
-			},
-			m.openBrowser(),
-		)
-	}
 }
 
 func (m *Model) fetchAllViewSections() tea.Cmd {
@@ -1536,10 +1035,6 @@ func (m *Model) fetchAllViewSections() tea.Cmd {
 		s, cmd := reposection.FetchAllBranches(m.ctx)
 		cmds = append(cmds, cmd)
 		m.repo = &s
-		return tea.Batch(cmds...)
-	case config.NotificationsView:
-		notifCmd := notificationssection.FetchAllSections(m.ctx, m.notifications)
-		cmds = append(cmds, notifCmd)
 		return tea.Batch(cmds...)
 	case config.PRsView:
 		prcmds := prssection.FetchAllSections(m.ctx, m.prs)
@@ -1559,11 +1054,6 @@ func (m *Model) getCurrentViewSections() []section.Section {
 			return []section.Section{}
 		}
 		return []section.Section{m.repo}
-	case config.NotificationsView:
-		if len(m.notifications) == 0 {
-			return []section.Section{}
-		}
-		return m.notifications
 	case config.PRsView:
 		return m.prs
 	default:
@@ -1579,33 +1069,17 @@ func (m *Model) updateTabs() {
 func (m *Model) switchSelectedView() tea.Cmd {
 	repoFF := config.IsFeatureEnabled(config.FF_REPO_VIEW)
 
-	// Reset notification subject when leaving notifications view
-	if m.ctx.View == config.NotificationsView {
-		keys.SetNotificationSubject(keys.NotificationSubjectNone)
-		m.notificationView.ClearSubject()
-	}
-
-	// View cycle: Notifications → PRs → Issues (→ Repo if enabled) → Notifications
-	if repoFF {
-		switch m.ctx.View {
-		case config.NotificationsView:
-			m.ctx.View = config.PRsView
-		case config.PRsView:
-			m.ctx.View = config.IssuesView
-		case config.IssuesView:
+	switch m.ctx.View {
+	case config.PRsView:
+		m.ctx.View = config.IssuesView
+	case config.IssuesView:
+		if repoFF {
 			m.ctx.View = config.RepoView
-		case config.RepoView:
-			m.ctx.View = config.NotificationsView
-		}
-	} else {
-		switch m.ctx.View {
-		case config.NotificationsView:
+		} else {
 			m.ctx.View = config.PRsView
-		case config.PRsView:
-			m.ctx.View = config.IssuesView
-		default:
-			m.ctx.View = config.NotificationsView
 		}
+	default:
+		m.ctx.View = config.PRsView
 	}
 
 	m.syncMainContentDimensions()
@@ -1651,32 +1125,6 @@ func (m *Model) isUserDefinedKeybinding(msg tea.KeyMsg) bool {
 		for _, keybinding := range m.ctx.Config.Keybindings.Branches {
 			if keybinding.Builtin == "" && keybinding.Key == msg.String() {
 				return true
-			}
-		}
-	}
-
-	if m.ctx.View == config.NotificationsView {
-		for _, keybinding := range m.ctx.Config.Keybindings.Notifications {
-			if keybinding.Builtin == "" && keybinding.Key == msg.String() {
-				return true
-			}
-		}
-
-		currRowData := m.getCurrRowData()
-		if nData, ok := currRowData.(*notificationrow.Data); ok {
-			switch nData.Notification.Subject.Type {
-			case "PullRequest":
-				for _, keybinding := range m.ctx.Config.Keybindings.Prs {
-					if keybinding.Builtin == "" && keybinding.Key == msg.String() {
-						return true
-					}
-				}
-			case "Issue":
-				for _, keybinding := range m.ctx.Config.Keybindings.Issues {
-					if keybinding.Builtin == "" && keybinding.Key == msg.String() {
-						return true
-					}
-				}
 			}
 		}
 	}
@@ -1790,77 +1238,6 @@ func (m *Model) doUpdateFooterAtInterval() tea.Cmd {
 	)
 }
 
-// promptConfirmationForNotificationPR shows a confirmation prompt for PR actions
-// when viewing a PR from a notification. This is separate from section-based
-// confirmation because the notification section doesn't know about PR actions.
-func (m *Model) promptConfirmationForNotificationPR(action string) tea.Cmd {
-	prompt := m.notificationView.SetPendingPRAction(action)
-	if prompt == "" {
-		return nil
-	}
-	m.footer.SetLeftSection(m.ctx.Styles.ListViewPort.PagerStyle.Render(prompt))
-	return nil
-}
-
-// promptConfirmationForNotificationIssue shows a confirmation prompt for Issue actions
-// when viewing an Issue from a notification.
-func (m *Model) promptConfirmationForNotificationIssue(action string) tea.Cmd {
-	prompt := m.notificationView.SetPendingIssueAction(action)
-	if prompt == "" {
-		return nil
-	}
-	m.footer.SetLeftSection(m.ctx.Styles.ListViewPort.PagerStyle.Render(prompt))
-	return nil
-}
-
-// executeNotificationAction executes a PR/Issue action after user confirmation
-func (m *Model) executeNotificationAction(action string) tea.Cmd {
-	if action == "" {
-		return nil
-	}
-
-	sid := tasks.SectionIdentifier{Id: m.currSectionId, Type: notificationssection.SectionType}
-	pr := m.notificationView.GetSubjectPR()
-	issue := m.notificationView.GetSubjectIssue()
-
-	switch action {
-	case "pr_close":
-		if pr != nil {
-			return tasks.ClosePR(m.ctx, sid, pr)
-		}
-	case "pr_reopen":
-		if pr != nil {
-			return tasks.ReopenPR(m.ctx, sid, pr)
-		}
-	case "pr_ready":
-		if pr != nil {
-			return tasks.PRReady(m.ctx, sid, pr)
-		}
-	case "pr_merge":
-		if pr != nil {
-			return tasks.MergePR(m.ctx, sid, pr)
-		}
-	case "pr_update":
-		if pr != nil {
-			return tasks.UpdatePR(m.ctx, sid, pr)
-		}
-	case "pr_approveWorkflows":
-		if pr != nil {
-			return tasks.ApproveWorkflows(m.ctx, sid, pr)
-		}
-	case "issue_close":
-		if issue != nil {
-			return tasks.CloseIssue(m.ctx, sid, issue)
-		}
-	case "issue_reopen":
-		if issue != nil {
-			return tasks.ReopenIssue(m.ctx, sid, issue)
-		}
-	}
-
-	return nil
-}
-
 func (m *Model) addNewSection() {
 	var sid int
 	switch m.ctx.View {
@@ -1874,17 +1251,6 @@ func (m *Model) addNewSection() {
 				Filters: "archived:false",
 			},
 			time.Now(),
-			time.Now(),
-		)))
-	case config.NotificationsView:
-		sid = len(m.notifications)
-		m.notifications = append(m.notifications, new(notificationssection.NewModel(
-			sid,
-			m.ctx,
-			config.NotificationsSectionConfig{
-				Title:   "Scratch",
-				Filters: "archived:false",
-			},
 			time.Now(),
 		)))
 	case config.PRsView:
@@ -1915,8 +1281,6 @@ func (m *Model) removeSection() {
 	switch m.ctx.View {
 	case config.IssuesView:
 		m.issues = slices.Delete(m.issues, del, del+1)
-	case config.NotificationsView:
-		m.notifications = slices.Delete(m.notifications, del, del+1)
 	case config.PRsView:
 		m.prs = slices.Delete(m.prs, del, del+1)
 	}
@@ -1933,7 +1297,6 @@ func (m *Model) removeSection() {
 func (m *Model) initSections() {
 	m.prs = prssection.InitSections(m.ctx)
 	m.issues = issuessection.InitSections(m.ctx)
-	m.notifications = notificationssection.InitSections(m.ctx)
 }
 
 func (m *Model) isViewSectionsStale() bool {

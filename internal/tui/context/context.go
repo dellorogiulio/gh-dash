@@ -71,10 +71,6 @@ func (ctx *ProgramContext) GetViewSectionsConfig() []config.SectionConfig {
 			Limit:   utils.IntPtr(20),
 			Type:    &t,
 		}.ToSectionConfig())
-	case config.NotificationsView:
-		for _, cfg := range ctx.Config.NotificationsSections {
-			configs = append(configs, cfg.ToSectionConfig())
-		}
 	case config.PRsView:
 		for _, cfg := range ctx.Config.PRSections {
 			configs = append(configs, cfg.ToSectionConfig())

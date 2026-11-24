@@ -21,7 +21,6 @@ type Theme struct {
 	SuccessText             compat.AdaptiveColor // config.Theme.Colors.Text.Success
 	WarningText             compat.AdaptiveColor // config.Theme.Colors.Text.Warning
 	ErrorText               compat.AdaptiveColor // config.Theme.Colors.Text.Error
-	ActorText               compat.AdaptiveColor // config.Theme.Colors.Text.Actor
 	NewContributorIconColor compat.AdaptiveColor // config.Theme.Colors.Icon.NewContributor
 	ContributorIconColor    compat.AdaptiveColor // config.Theme.Colors.Icon.Contributor
 	CollaboratorIconColor   compat.AdaptiveColor // config.Theme.Colors.Icon.Collaborator
@@ -81,10 +80,6 @@ var DefaultTheme = &Theme{
 		Light: lipgloss.ANSIColor(1),
 		Dark:  lipgloss.ANSIColor(9),
 	},
-	ActorText: compat.AdaptiveColor{
-		Light: lipgloss.ANSIColor(244),
-		Dark:  lipgloss.ANSIColor(251),
-	}, // Same as SecondaryText
 	NewContributorIconColor: compat.AdaptiveColor{
 		Light: lipgloss.ANSIColor(77),
 		Dark:  lipgloss.ANSIColor(77),
@@ -184,10 +179,6 @@ func ParseTheme(cfg *config.Config) Theme {
 		DefaultTheme.ErrorText = _shimColor(
 			cfg.Theme.Colors.Inline.Text.Error,
 			DefaultTheme.ErrorText,
-		)
-		DefaultTheme.ActorText = _shimColor(
-			cfg.Theme.Colors.Inline.Text.Actor,
-			DefaultTheme.ActorText,
 		)
 		DefaultTheme.NewContributorIconColor = _shimColor(
 			cfg.Theme.Colors.Inline.Icon.NewContributor,

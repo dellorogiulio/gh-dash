@@ -753,10 +753,6 @@ func (m *Model) GoToFirstTab() {
 	m.carousel.SetCursor(0)
 }
 
-func (m *Model) GoToActivityTab() {
-	m.carousel.SetCursor(1) // Activity is the second tab (index 1)
-}
-
 func (m Model) SelectedTab() string {
 	return m.carousel.SelectedItem()
 }
