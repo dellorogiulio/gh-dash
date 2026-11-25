@@ -8,6 +8,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -519,4 +521,151 @@ func TestQueueLooksUpValidBlockersNextToAnOversizedNumber(t *testing.T) {
 	require.Equal(t, []int{3, 2}, rowNumbers(m))
 	require.Equal(t, []string{"🟢 Next", "🔴 Blocked by other/lib#99999999999"}, stateTexts(m))
 	require.Equal(t, 1, queries.states)
+}
+
+// newRepoDir creates a checkout folder named repo, with a wiq worktree folder
+// next to it for each issue number.
+func newRepoDir(t *testing.T, worktreeIssues ...int) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	require.NoError(t, os.Mkdir(repo, 0o755))
+	for _, n := range worktreeIssues {
+		addWorktree(t, repo, n)
+	}
+	return repo
+}
+
+func addWorktree(t *testing.T, repo string, issue int) {
+	t.Helper()
+	require.NoError(t, os.Mkdir(fmt.Sprintf("%s.wiq-issue-%d", repo, issue), 0o755))
+}
+
+func worktreeMarkers(m *Model) map[int]string {
+	markers := map[int]string{}
+	numbers := rowNumbers(m)
+	for i, marker := range columnTexts(m, 2) {
+		markers[numbers[i]] = marker
+	}
+	return markers
+}
+
+var issuesForWorktrees = []data.IssueData{
+	blockedBy(2, "- #3"),
+	issue(3, "", "blocked"),
+}
+
+func TestRowsMarkIssuesWithAWiqWorktree(t *testing.T) {
+	serveGitHub(t, issuesForWorktrees, answerState("OPEN"))
+	queueTab, needsMeTab := newTabs(t, "me")
+	queueTab.Ctx.RepoPath = newRepoDir(t, 3)
+
+	fetch(t, queueTab)
+
+	require.Equal(t, map[int]string{2: "", 3: "⏵ worktree"}, worktreeMarkers(queueTab))
+	require.Equal(t, map[int]string{3: "⏵ worktree"}, worktreeMarkers(needsMeTab))
+}
+
+func TestRowsWithoutALocalRepoPathHaveNoWorktreeMarker(t *testing.T) {
+	serveGitHub(t, issuesForWorktrees, answerState("OPEN"))
+	m := newQueueTab(newTestContext(t, "me"))
+	m.Ctx.RepoPath = ""
+
+	fetch(t, m)
+
+	require.Equal(t, map[int]string{2: "", 3: ""}, worktreeMarkers(m))
+}
+
+func TestWorktreeMarkerWaitsForTheNextRefresh(t *testing.T) {
+	serveGitHub(t, issuesForWorktrees, answerState("OPEN"))
+	m := newQueueTab(newTestContext(t, "me"))
+	m.Ctx.RepoPath = newRepoDir(t)
+	fetch(t, m)
+
+	addWorktree(t, m.Ctx.RepoPath, 2)
+	for range 3 {
+		m.Update(nil)
+		m.Table.SetRows(m.BuildRows())
+	}
+	require.Equal(t, "", worktreeMarkers(m)[2])
+
+	m.ResetRows()
+	fetch(t, m)
+	require.Equal(t, "⏵ worktree", worktreeMarkers(m)[2])
+}
+
+func TestWorktreesAreLookedUpNextToTheRepoPathsCheckoutFirst(t *testing.T) {
+	serveGitHub(t, issuesForWorktrees, answerState("OPEN"))
+	m := newQueueTab(newTestContext(t, "me"))
+	m.Ctx.Config.RepoPaths = map[string]string{"owner/repo": newRepoDir(t, 3) + "/"}
+	m.Ctx.RepoPath = newRepoDir(t, 2)
+
+	fetch(t, m)
+
+	require.Equal(t, map[int]string{2: "", 3: "⏵ worktree"}, worktreeMarkers(m))
+}
+
+func TestWorktreesAreFoundForARepoPathUnderTheHomeFolder(t *testing.T) {
+	serveGitHub(t, issuesForWorktrees, answerState("OPEN"))
+	repo := newRepoDir(t, 3)
+	t.Setenv("HOME", filepath.Dir(repo))
+	m := newQueueTab(newTestContext(t, "me"))
+	m.Ctx.Config.RepoPaths = map[string]string{"owner/*": "~/*"}
+
+	fetch(t, m)
+
+	require.Equal(t, "⏵ worktree", worktreeMarkers(m)[3])
+}
+
+func renderedRows(t *testing.T, compact bool) map[int]string {
+	t.Helper()
+	m := newQueueTab(newTestContext(t, "me"))
+	m.Ctx.Config.Theme.Ui.Table.Compact = compact
+	m.Ctx.MainContentWidth, m.Ctx.MainContentHeight = 160, 40
+	m.UpdateProgramContext(m.Ctx)
+	m.FetchNextPageSectionRows()
+	m.Update(SectionQueueFetchedMsg{
+		Issues: []data.IssueData{
+			blockedBy(2, "- #4\n- #9"),
+			blockedBy(3, "- #4\n- #9"),
+			issue(4, "", "hitl"),
+			issue(9, "", "blocked"),
+		},
+		Worktrees: map[int]bool{2: true},
+		TaskId:    m.LastFetch.TaskId,
+	})
+
+	rows := map[int]string{}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for i, line := range lines {
+		for _, number := range []int{2, 3} {
+			if strings.Contains(line, fmt.Sprintf("#%d an issue", number)) {
+				rows[number] = strings.Join(lines[i:min(i+2, len(lines))], "\n")
+				if compact {
+					rows[number] = line
+				}
+			}
+		}
+	}
+	require.Len(t, rows, 2)
+	return rows
+}
+
+func TestRenderedRowsShowTheWorktreeMarkerWithoutHidingTheState(t *testing.T) {
+	tests := map[bool][]string{
+		true:  {"🔴 Blocked by #4"},
+		false: {"🔴 Blocked by #4", "#9 (parked)"},
+	}
+	for compact, stateLines := range tests {
+		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
+			rows := renderedRows(t, compact)
+
+			require.Contains(t, rows[2], "⏵ worktree")
+			for _, line := range stateLines {
+				require.Contains(t, rows[2], line)
+			}
+			require.NotContains(t, rows[3], "⏵")
+			unmarked := strings.ReplaceAll(rows[2], "⏵ worktree", "          ")
+			require.Equal(t, rows[3], strings.ReplaceAll(unmarked, "#2 an issue", "#3 an issue"))
+		})
+	}
 }

@@ -2,6 +2,8 @@ package queuesection
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -9,11 +11,13 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/queue"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuerow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuessection"
@@ -38,6 +42,7 @@ type shared struct {
 	tabs            []*Model
 	openIssues      []data.IssueData
 	otherRepoStates map[queue.Ref]string
+	worktrees       map[int]bool
 	analysis        queue.Analysis
 	analysisChanges int
 	analyzedFor     string
@@ -46,7 +51,10 @@ type shared struct {
 var (
 	stateColumnWidth    = 24
 	unblocksColumnWidth = 8
+	worktreeColumnWidth = lipgloss.Width(worktreeMarker) + 2
 )
+
+const worktreeMarker = "⏵ worktree"
 
 func newModel(
 	id int,
@@ -66,6 +74,7 @@ func newModel(
 				[]table.Column{
 					{Title: "State", Width: &stateColumnWidth},
 					{Title: "Unblocks", Width: &unblocksColumnWidth},
+					{Title: "Worktree", Width: &worktreeColumnWidth},
 				},
 				issuessection.GetSectionColumns(config.IssuesSectionConfig{}, ctx)...,
 			),
@@ -132,6 +141,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 		if m.LastFetch.TaskId == msg.TaskId {
 			m.shared.openIssues = msg.Issues
 			m.shared.otherRepoStates = msg.OtherRepoStates
+			m.shared.worktrees = msg.Worktrees
 			m.shared.analyze(m.Ctx)
 			for _, tab := range m.shared.tabs {
 				tab.PageInfo = &data.PageInfo{}
@@ -192,12 +202,17 @@ func (m *Model) BuildRows() []table.Row {
 			Ctx:            m.Ctx,
 			Data:           entry.Issue,
 			ShowAuthorIcon: m.ShowAuthorIcon,
-			Columns:        m.Table.Columns[2:],
+			Columns:        m.Table.Columns[3:],
+		}
+		worktree := ""
+		if m.shared.worktrees[entry.Issue.Number] {
+			worktree = worktreeMarker
 		}
 		style := components.GetIssueTextStyle(m.Ctx)
 		row := table.Row{
 			style.Render(stateText(entry)),
 			style.Render(strconv.Itoa(entry.Unblocks)),
+			style.Render(worktree),
 		}
 		rows = append(rows, append(row, issueModel.ToTableRow(currItem == i)...))
 	}
@@ -309,6 +324,11 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 	}
 
 	owner, name := m.Ctx.GHRepo.Owner, m.Ctx.GHRepo.Name
+	repoPath, hasRepoPath := common.ResolveRepoPath(
+		owner+"/"+name,
+		m.Ctx.Config.RepoPaths,
+		m.Ctx.RepoPath,
+	)
 	taskId := fmt.Sprintf("fetching_queue_%s", time.Now().String())
 	startCmd := m.Ctx.StartTask(context.Task{
 		Id:           taskId,
@@ -333,6 +353,11 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			log.Warn("Failed to look up blockers in other repos", "err", err)
 		}
 
+		var worktrees map[int]bool
+		if hasRepoPath {
+			worktrees = wiqWorktrees(repoPath)
+		}
+
 		return constants.TaskFinishedMsg{
 			SectionId:   m.Id,
 			SectionType: m.Type,
@@ -340,6 +365,7 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			Msg: SectionQueueFetchedMsg{
 				Issues:          issues,
 				OtherRepoStates: otherRepoStates,
+				Worktrees:       worktrees,
 				TaskId:          taskId,
 			},
 		}
@@ -395,7 +421,35 @@ func FetchAllSections(ctx *context.ProgramContext, existing []section.Section) t
 type SectionQueueFetchedMsg struct {
 	Issues          []data.IssueData
 	OtherRepoStates map[queue.Ref]string
+	Worktrees       map[int]bool
 	TaskId          string
+}
+
+// wiqWorktrees lists the issues that have a worktree from wiq, which creates
+// it next to the checkout as <checkout folder>.wiq-issue-<number>.
+func wiqWorktrees(repoPath string) map[int]bool {
+	if underHome, ok := strings.CutPrefix(repoPath, "~"); ok {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		repoPath = home + underHome
+	}
+	repoPath = filepath.Clean(repoPath)
+	prefix := filepath.Base(repoPath) + ".wiq-issue-"
+	entries, err := os.ReadDir(filepath.Dir(repoPath))
+	if err != nil {
+		return nil
+	}
+	worktrees := map[int]bool{}
+	for _, entry := range entries {
+		suffix, isWiq := strings.CutPrefix(entry.Name(), prefix)
+		number, err := strconv.Atoi(suffix)
+		if isWiq && err == nil && entry.IsDir() {
+			worktrees[number] = true
+		}
+	}
+	return worktrees
 }
 
 func (m Model) GetItemSingularForm() string {
