@@ -75,6 +75,7 @@ Thank you to all past and existing sponsors! 🙏🏽
 - Custom actions to perform your specific workflow needs
 - Everything you can do on GitHub - diff, comment, checkout, push, update etc.
 - Control every setting with a YAML config file
+- A [Queue view](docs/queue.md) that lists the issues wiq would work next and the ones waiting on you
 
 If you like quickly navigating with your keyboard, seeing the PRs and issues you need and you <strong>love the terminal</strong> - <code>DASH</code> is for you! 🫵🏽
 
