@@ -153,7 +153,10 @@ func TestPreviewMarksACycleAndStopsThere(t *testing.T) {
 	view := ansi.Strip(previewIn(t, cyclic, 3))
 	lines := strings.Split(view, "\n")
 
-	blockedByAt := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Blocked by") })
+	blockedByAt := slices.IndexFunc(
+		lines,
+		func(l string) bool { return strings.Contains(l, "Blocked by") },
+	)
 	require.GreaterOrEqual(t, blockedByAt, 0, view)
 	tree := lines[blockedByAt+1:]
 	require.Contains(t, tree[0], "└─ ")

@@ -106,7 +106,11 @@ func TestBlockers(t *testing.T) {
 }
 
 func TestBlockersKeepANumberBeyond64BitsOutOfLookupRange(t *testing.T) {
-	refs := Blockers("## Blocked by\n\n- other/lib#123456789012345678901234567890\n", "owner", "repo")
+	refs := Blockers(
+		"## Blocked by\n\n- other/lib#123456789012345678901234567890\n",
+		"owner",
+		"repo",
+	)
 
 	require.Len(t, refs, 1)
 	require.Equal(t, "other/lib", refs[0].Owner+"/"+refs[0].Repo)

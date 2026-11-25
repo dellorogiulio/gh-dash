@@ -57,7 +57,10 @@ func Analyze(
 
 	needsMe := slices.Concat(parked, hitl)
 	slices.SortFunc(needsMe, func(x, y Entry) int {
-		return cmp.Or(cmp.Compare(y.Unblocks, x.Unblocks), cmp.Compare(x.Issue.Number, y.Issue.Number))
+		return cmp.Or(
+			cmp.Compare(y.Unblocks, x.Unblocks),
+			cmp.Compare(x.Issue.Number, y.Issue.Number),
+		)
 	})
 	analysis := Analysis{
 		Queue:    slices.Concat(a.classify(candidates(openIssues, me)), parked),

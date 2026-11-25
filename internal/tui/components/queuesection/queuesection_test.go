@@ -474,7 +474,9 @@ func TestQueueKeepsResolvedBlockersWhenOthersFail(t *testing.T) {
 			))
 			alias := fmt.Sprintf("ref%d", i)
 			if number == float64(1) {
-				repos[alias] = map[string]any{"issueOrPullRequest": map[string]any{"state": "CLOSED"}}
+				repos[alias] = map[string]any{
+					"issueOrPullRequest": map[string]any{"state": "CLOSED"},
+				}
 				continue
 			}
 			repos[alias] = nil

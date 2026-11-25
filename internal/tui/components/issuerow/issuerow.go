@@ -119,7 +119,8 @@ func (issue *Issue) renderSubIssuesProgress(baseStyle lipgloss.Style) string {
 		return ""
 	}
 
-	icon := baseStyle.Foreground(lipgloss.Color("#a371f7")).Render(progressIcon(summary.Completed, summary.Total))
+	icon := baseStyle.Foreground(lipgloss.Color("#a371f7")).
+		Render(progressIcon(summary.Completed, summary.Total))
 	count := baseStyle.Foreground(issue.Ctx.Theme.SecondaryText).
 		Render(fmt.Sprintf(" %d/%d", summary.Completed, summary.Total))
 	return baseStyle.Render("  ") + icon + count
@@ -175,7 +176,11 @@ func (issue *Issue) renderLabels(isSelected bool, width int) string {
 		remaining := len(labels) - i - 1
 		overflowWidth := 0
 		if remaining > 0 {
-			overflowWidth = lipgloss.Width(separator) + lipgloss.Width(fmt.Sprintf("+%d", remaining))
+			overflowWidth = lipgloss.Width(
+				separator,
+			) + lipgloss.Width(
+				fmt.Sprintf("+%d", remaining),
+			)
 		}
 		if usedWidth+itemWidth+overflowWidth > width && usedWidth > 0 {
 			rendered = append(rendered, nameStyle.Render(fmt.Sprintf("+%d", len(labels)-i)))

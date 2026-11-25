@@ -48,7 +48,8 @@ func isParked(i data.IssueData, me string) bool {
 }
 
 func qualifies(i data.IssueData, me string) bool {
-	return !hasAnyLabel(i, otherSkipLabels) && !hasHITLTitle(i) && hasParent(i) && isFreeOrMine(i, me)
+	return !hasAnyLabel(i, otherSkipLabels) && !hasHITLTitle(i) && hasParent(i) &&
+		isFreeOrMine(i, me)
 }
 
 func isHITL(i data.IssueData) bool {

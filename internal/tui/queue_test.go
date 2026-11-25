@@ -625,7 +625,11 @@ func TestQueueView_HighlightResetsAfterARoundTripThroughTheOtherViews(t *testing
 		visited = append(visited, m.ctx.View)
 	}
 
-	require.Equal(t, []config.ViewType{config.PRsView, config.IssuesView, config.QueueView}, visited)
+	require.Equal(
+		t,
+		[]config.ViewType{config.PRsView, config.IssuesView, config.QueueView},
+		visited,
+	)
 	require.Equal(t, 2, currQueueIssue(t, m).Number)
 	requireNoHighlightAndNoJump(t, m, &startedTasks)
 }
