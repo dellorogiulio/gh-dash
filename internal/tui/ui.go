@@ -295,6 +295,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.TogglePreview):
 			m.sidebar.IsOpen = !m.sidebar.IsOpen
 			m.syncMainContentDimensions()
+			cmds = append(cmds, m.syncSidebar())
 
 		case key.Matches(msg, m.keys.TogglePreviewPosition):
 			if m.sidebar.IsOpen {
@@ -478,6 +479,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncSidebar()
 				return m, nil
 			}
+		case m.isPreviewingQueue() && key.Matches(msg, keys.IssueKeys.NextDependency):
+			m.issueSidebar.HighlightNextNode()
+			m.syncSidebar()
+
+		case m.isPreviewingQueue() && key.Matches(msg, keys.IssueKeys.JumpToDependency):
+			cmds = append(cmds, m.jumpToHighlightedDependency())
+
 		case m.ctx.View == config.IssuesView || m.ctx.View == config.QueueView:
 			switch {
 			case key.Matches(msg, m.keys.OpenGithub):
@@ -815,6 +823,7 @@ func (m *Model) setCurrSectionId(newSectionId int) {
 }
 
 func (m *Model) onViewedRowChanged() tea.Cmd {
+	m.issueSidebar.ResetHighlight()
 	m.prView.SetSummaryViewLess()
 	m.prView.GoToFirstTab()
 	sidebarCmd := m.syncSidebar()
@@ -863,8 +872,12 @@ func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
 		updatedSection, cmd = m.issues[id].Update(msg)
 		m.issues[id] = updatedSection
 	case queuesection.SectionType:
+		analysisChanges := m.queue[id].(*queuesection.Model).AnalysisChanges()
 		updatedSection, cmd = m.queue[id].Update(msg)
 		m.queue[id] = updatedSection
+		if updatedSection.(*queuesection.Model).AnalysisChanges() != analysisChanges {
+			m.issueSidebar.ResetHighlight()
+		}
 	}
 
 	currSection := m.getCurrSection()

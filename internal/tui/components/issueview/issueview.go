@@ -38,6 +38,7 @@ type Model struct {
 	editor  cmpcontroller.Controller
 
 	upstream, downstream queue.Node
+	highlighted          int
 }
 
 func NewModel(ctx *context.ProgramContext) Model {
@@ -45,9 +46,10 @@ func NewModel(ctx *context.ProgramContext) Model {
 	cmp := cmpcontroller.New(ctx, inputbox.ModelOpts{TextArea: &ta})
 
 	return Model{
-		ctx:    ctx,
-		issue:  nil,
-		editor: cmp,
+		ctx:         ctx,
+		issue:       nil,
+		editor:      cmp,
+		highlighted: noHighlight,
 	}
 }
 

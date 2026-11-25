@@ -2,6 +2,8 @@ package queuesection
 
 import (
 	"fmt"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +39,7 @@ type shared struct {
 	openIssues      []data.IssueData
 	otherRepoStates map[queue.Ref]string
 	analysis        queue.Analysis
+	analysisChanges int
 	analyzedFor     string
 }
 
@@ -159,8 +162,17 @@ func (s *shared) analyze(ctx *context.ProgramContext) {
 	if ctx.HasGHRepo() {
 		owner, name = ctx.GHRepo.Owner, ctx.GHRepo.Name
 	}
-	s.analysis = queue.Analyze(s.openIssues, ctx.User, s.otherRepoStates, owner, name)
+	analysis := queue.Analyze(s.openIssues, ctx.User, s.otherRepoStates, owner, name)
+	if !reflect.DeepEqual(analysis, s.analysis) {
+		s.analysisChanges++
+	}
+	s.analysis = analysis
 	s.analyzedFor = ctx.User
+}
+
+// AnalysisChanges counts the times the analysis shared by the tabs changed.
+func (m *Model) AnalysisChanges() int {
+	return m.shared.analysisChanges
 }
 
 // The login is fetched in parallel with the issues, so the analysis is redone
@@ -250,6 +262,27 @@ func (m *Model) GetCurrRow() data.RowData {
 	}
 	issue := entries[idx].Issue
 	return &issue
+}
+
+// SelectIssue moves the cursor to the row of the issue, reporting whether the
+// tab lists it.
+func (m *Model) SelectIssue(number int) bool {
+	row := slices.IndexFunc(m.entries(), func(e queue.Entry) bool {
+		return e.Issue.Number == number
+	})
+	if row < 0 {
+		return false
+	}
+	// NextItem stops at the table's last row, which must exist for the loop to end.
+	m.Table.SetRows(m.BuildRows())
+	for m.Table.GetCurrItem() < row {
+		m.Table.NextItem()
+	}
+	for m.Table.GetCurrItem() > row {
+		m.Table.PrevItem()
+	}
+	m.Table.SetRows(m.BuildRows())
+	return true
 }
 
 func (m *Model) DependencyTrees() (upstream, downstream queue.Node) {

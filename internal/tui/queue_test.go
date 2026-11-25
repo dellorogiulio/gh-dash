@@ -5,12 +5,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/cli/go-gh/v2/pkg/repository"
+	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
@@ -421,4 +423,388 @@ func TestIssuesView_PreviewHasNoDependencyTrees(t *testing.T) {
 	require.Contains(t, view, "#2 · owner/repo")
 	require.NotContains(t, view, "Unblocks")
 	require.NotContains(t, view, "└─")
+}
+
+func chainedIssues() []data.IssueData {
+	issues := dependentIssues()
+	last := queueIssue(4, "")
+	last.Title = "[AFK] Reach the station"
+	last.Body += "\n\n## Blocked by\n\n- #3\n"
+	return append(issues, last)
+}
+
+func highlightedLine(t *testing.T, m Model) string {
+	t.Helper()
+	var highlighted []string
+	for line := range strings.SplitSeq(ansi.Strip(m.issueSidebar.View()), "\n") {
+		if strings.Contains(line, "▶") {
+			highlighted = append(highlighted, strings.TrimSpace(line))
+		}
+	}
+	require.LessOrEqual(t, len(highlighted), 1)
+	if len(highlighted) == 0 {
+		return ""
+	}
+	return highlighted[0]
+}
+
+func TestQueueView_TabHighlightsTheTreeNodesInTurn(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Text: "j"})
+	require.Equal(t, 3, currQueueIssue(t, m).Number)
+	require.Empty(t, highlightedLine(t, m))
+
+	var highlighted []string
+	for range 3 {
+		m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		highlighted = append(highlighted, highlightedLine(t, m))
+	}
+
+	require.Equal(t, []string{
+		"└─ ▶ 🟢 #2 [AFK] Lay the rails",
+		"└─ ▶ 🔴 #4 [AFK] Reach the station",
+		"└─ ▶ 🟢 #2 [AFK] Lay the rails",
+	}, highlighted)
+}
+
+func TestQueueView_HighlightResetsWhenTheRowChanges(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.NotEmpty(t, highlightedLine(t, m))
+
+	m.Update(tea.KeyPressMsg{Text: "j"})
+	m.Update(tea.KeyPressMsg{Text: "k"})
+
+	require.Empty(t, highlightedLine(t, m))
+}
+
+func TestQueueView_HighlightResetsWhenTheRowChangesWithThePreviewClosed(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Text: "j"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, "└─ ▶ 🟢 #2 [AFK] Lay the rails", highlightedLine(t, m))
+
+	m.Update(tea.KeyPressMsg{Text: "p"})
+	m.Update(tea.KeyPressMsg{Text: "j"})
+	m.Update(tea.KeyPressMsg{Text: "p"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.Equal(t, 4, currQueueIssue(t, m).Number)
+	require.Empty(t, highlightedLine(t, m))
+	view := ansi.Strip(m.issueSidebar.View())
+	require.Contains(t, view, "#4 · owner/repo")
+	require.Contains(t, view, "Blocked by")
+	require.NotContains(t, view, "Unblocks")
+}
+
+func refetchQueue(m *Model, issues []data.IssueData) {
+	queueTab := m.queue[0].(*queuesection.Model)
+	queueTab.FetchNextPageSectionRows()
+	m.Update(constants.TaskFinishedMsg{
+		SectionId:   0,
+		SectionType: queuesection.SectionType,
+		TaskId:      queueTab.LastFetch.TaskId,
+		Msg: queuesection.SectionQueueFetchedMsg{
+			Issues: issues,
+			TaskId: queueTab.LastFetch.TaskId,
+		},
+	})
+}
+
+func TestQueueView_HighlightResetsWhenTheAnalysisChanges(t *testing.T) {
+	another := queueIssue(5, "")
+	another.Title = "[AFK] Build the bridge"
+	another.Body += "\n\n## Blocked by\n\n- #2\n"
+	changed := append(chainedIssues(), another)
+
+	tests := []struct {
+		name        string
+		refetched   []data.IssueData
+		highlighted string
+	}{
+		{
+			name:        "same issues",
+			refetched:   chainedIssues(),
+			highlighted: "└─ ▶ 🔴 #3 [AFK] Run the train",
+		},
+		{name: "changed issues", refetched: changed, highlighted: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var startedTasks []string
+			m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+			m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+			require.Equal(t, 2, currQueueIssue(t, m).Number)
+
+			refetchQueue(&m, tc.refetched)
+
+			require.Equal(t, 2, currQueueIssue(t, m).Number)
+			require.Equal(t, tc.highlighted, highlightedLine(t, m))
+		})
+	}
+}
+
+func TestQueueView_HighlightResetsWhenTheAnalysisChangesWithThePreviewClosed(t *testing.T) {
+	another := queueIssue(5, "")
+	another.Title = "[AFK] Build the bridge"
+	another.Body += "\n\n## Blocked by\n\n- #2\n"
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, "└─ ▶ 🔴 #3 [AFK] Run the train", highlightedLine(t, m))
+
+	m.Update(tea.KeyPressMsg{Text: "p"})
+	refetchQueue(&m, append(chainedIssues(), another))
+	m.Update(tea.KeyPressMsg{Text: "p"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.Equal(t, 2, currQueueIssue(t, m).Number)
+	require.Empty(t, highlightedLine(t, m))
+	require.Contains(t, ansi.Strip(m.issueSidebar.View()), "#5 [AFK] Build the bridge")
+}
+
+func requireNoHighlightAndNoJump(t *testing.T, m Model, startedTasks *[]string) {
+	t.Helper()
+	require.Empty(t, highlightedLine(t, m))
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, config.QueueView, m.ctx.View)
+	require.Equal(t, 0, m.currSectionId)
+	require.Equal(t, 2, currQueueIssue(t, m).Number)
+	require.NotContains(t, *startedTasks, "Opening in browser")
+}
+
+func TestQueueView_HighlightStaysResetWhenAChangeIsUndoneWithThePreviewClosed(t *testing.T) {
+	another := queueIssue(5, "")
+	another.Title = "[AFK] Build the bridge"
+	another.Body += "\n\n## Blocked by\n\n- #2\n"
+
+	tests := []struct {
+		name string
+		undo func(m *Model)
+	}{
+		{name: "row moved away and back", undo: func(m *Model) {
+			m.Update(tea.KeyPressMsg{Text: "j"})
+			m.Update(tea.KeyPressMsg{Text: "k"})
+		}},
+		{name: "analysis changed and changed back", undo: func(m *Model) {
+			refetchQueue(m, append(chainedIssues(), another))
+			refetchQueue(m, chainedIssues())
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var startedTasks []string
+			m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+			m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+			require.Equal(t, "└─ ▶ 🔴 #3 [AFK] Run the train", highlightedLine(t, m))
+
+			m.Update(tea.KeyPressMsg{Text: "p"})
+			tc.undo(&m)
+			m.Update(tea.KeyPressMsg{Text: "p"})
+
+			require.Equal(t, 2, currQueueIssue(t, m).Number)
+			requireNoHighlightAndNoJump(t, m, &startedTasks)
+		})
+	}
+}
+
+func TestQueueView_HighlightResetsAfterARoundTripThroughTheOtherViews(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, "└─ ▶ 🔴 #3 [AFK] Run the train", highlightedLine(t, m))
+
+	var visited []config.ViewType
+	for range 3 {
+		m.Update(tea.KeyPressMsg{Text: "s"})
+		visited = append(visited, m.ctx.View)
+	}
+
+	require.Equal(t, []config.ViewType{config.PRsView, config.IssuesView, config.QueueView}, visited)
+	require.Equal(t, 2, currQueueIssue(t, m).Number)
+	requireNoHighlightAndNoJump(t, m, &startedTasks)
+}
+
+func TestQueueView_HighlightSurvivesAResize(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Text: "j"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	m.Update(tea.WindowSizeMsg{Width: 300, Height: 60})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	require.Equal(t, "└─ ▶ 🔴 #4 [AFK] Reach the station", highlightedLine(t, m))
+}
+
+func TestQueueView_JumpingToACandidateBlockerSelectsItsRow(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Text: "j"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.Equal(t, 0, m.currSectionId)
+	require.Equal(t, 2, currQueueIssue(t, m).Number)
+	require.Contains(t, ansi.Strip(m.issueSidebar.View()), "#2 · owner/repo")
+}
+
+func TestQueueView_JumpingToAHITLBlockerSwitchesToNeedsMe(t *testing.T) {
+	decision := queueIssue(2, "")
+	decision.Title = "[HITL] Pick the gauge"
+	waiting := queueIssue(3, "")
+	waiting.Title = "[AFK] Lay the rails"
+	waiting.Body += "\n\n## Blocked by\n\n- #2\n"
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, decision, waiting)
+	require.Equal(t, 3, currQueueIssue(t, m).Number)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.Equal(t, 1, m.currSectionId)
+	require.Equal(t, 2, currQueueIssue(t, m).Number)
+	require.Contains(t, ansi.Strip(m.issueSidebar.View()), "#2 · owner/repo")
+}
+
+// Points GH_BROWSER at a script that records the URL it is asked to open.
+func stubBrowser(t *testing.T) (openedUrl func() string) {
+	t.Helper()
+	dir := t.TempDir()
+	opened := filepath.Join(dir, "opened")
+	script := filepath.Join(dir, "browser")
+	require.NoError(
+		t,
+		os.WriteFile(script, []byte("#!/bin/sh\nprintf %s \"$1\" > "+opened+"\n"), 0o755),
+	)
+	t.Setenv("GH_BROWSER", script)
+	return func() string {
+		url, err := os.ReadFile(opened)
+		require.NoError(t, err)
+		return string(url)
+	}
+}
+
+func TestQueueView_JumpingToABlockerOutsideTheTabsOpensItInTheBrowser(t *testing.T) {
+	tests := []struct {
+		name    string
+		blocker string
+		url     string
+	}{
+		{name: "closed", blocker: "#9", url: "https://github.com/owner/repo/issues/9"},
+		{name: "other repo", blocker: "other/lib#4", url: "https://github.com/other/lib/issues/4"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			openedUrl := stubBrowser(t)
+			waiting := queueIssue(3, "")
+			waiting.Body += "\n\n## Blocked by\n\n- " + tc.blocker + "\n"
+			var startedTasks []string
+			m := newQueueTestModel(t, &startedTasks, waiting)
+			m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			finished := taskFinishedFrom(t, cmd)
+
+			require.NoError(t, finished.Err)
+			require.Equal(t, tc.url, openedUrl())
+			require.Equal(t, 3, currQueueIssue(t, m).Number)
+		})
+	}
+}
+
+func TestQueueView_DependencyKeysDoNothingWithoutAHighlightedNode(t *testing.T) {
+	tests := []struct {
+		name   string
+		issues []data.IssueData
+		keys   []tea.KeyPressMsg
+	}{
+		{
+			name:   "no tree nodes",
+			issues: []data.IssueData{queueIssue(5, "")},
+			keys: []tea.KeyPressMsg{
+				{Code: tea.KeyTab}, {Code: tea.KeyEnter},
+			},
+		},
+		{name: "nothing highlighted", issues: chainedIssues(), keys: []tea.KeyPressMsg{
+			{Code: tea.KeyEnter},
+		}},
+		{name: "preview closed", issues: chainedIssues(), keys: []tea.KeyPressMsg{
+			{Text: "p"}, {Code: tea.KeyTab}, {Code: tea.KeyEnter},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var startedTasks []string
+			m := newQueueTestModel(t, &startedTasks, tc.issues...)
+			selected := currQueueIssue(t, m).Number
+
+			for _, key := range tc.keys {
+				m.Update(key)
+			}
+
+			require.Empty(t, highlightedLine(t, m))
+			require.NotContains(t, startedTasks, "Opening in browser")
+			require.Equal(t, 0, m.currSectionId)
+			require.Equal(t, selected, currQueueIssue(t, m).Number)
+		})
+	}
+}
+
+func TestHelp_ListsTheDependencyKeysOnlyInTheQueueView(t *testing.T) {
+	tests := []struct {
+		view  config.ViewType
+		lists bool
+	}{
+		{view: config.QueueView, lists: true},
+		{view: config.IssuesView, lists: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.view), func(t *testing.T) {
+			var startedTasks []string
+			m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+			m.ctx.View = tc.view
+			zone.NewGlobal()
+			zone.SetEnabled(false)
+			m.Update(tea.WindowSizeMsg{Width: 400, Height: 80})
+
+			m.Update(tea.KeyPressMsg{Text: "?"})
+
+			help := ansi.Strip(m.footer.View())
+			require.Contains(t, help, "switch to PRs")
+			for _, binding := range []string{`tab\s+next dependency`, `enter\s+jump to dependency`} {
+				if tc.lists {
+					require.Regexp(t, binding, help)
+				} else {
+					require.NotRegexp(t, binding, help)
+				}
+			}
+		})
+	}
+}
+
+func TestQueueView_DependencyKeysCanBeRebound(t *testing.T) {
+	issueKeys := keys.IssueKeys
+	t.Cleanup(func() { keys.IssueKeys = issueKeys })
+	require.NoError(t, keys.Rebind(nil, []config.Keybinding{
+		{Key: "b", Builtin: "nextDependency"},
+		{Key: "J", Builtin: "jumpToDependency"},
+	}, nil, nil, nil))
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, chainedIssues()...)
+	m.Update(tea.KeyPressMsg{Text: "j"})
+
+	m.Update(tea.KeyPressMsg{Text: "b"})
+	m.Update(tea.KeyPressMsg{Text: "J"})
+
+	require.Equal(t, 2, currQueueIssue(t, m).Number)
 }
