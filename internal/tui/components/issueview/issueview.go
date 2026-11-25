@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/queue"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/cmpcontroller"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/fuzzyselect"
@@ -35,6 +36,8 @@ type Model struct {
 	section tasks.SectionIdentifier
 	width   int
 	editor  cmpcontroller.Controller
+
+	upstream, downstream queue.Node
 }
 
 func NewModel(ctx *context.ProgramContext) Model {
@@ -136,6 +139,11 @@ func (m Model) View() string {
 	labels := m.renderLabels()
 	if labels != "" {
 		s.WriteString(labels)
+		s.WriteString("\n\n")
+	}
+
+	if dependencies := m.renderDependencies(); dependencies != "" {
+		s.WriteString(dependencies)
 		s.WriteString("\n\n")
 	}
 
@@ -263,6 +271,7 @@ func (m *Model) SetSection(section tasks.SectionIdentifier) {
 }
 
 func (m *Model) SetRow(data *data.IssueData) {
+	m.upstream, m.downstream = queue.Node{}, queue.Node{}
 	if data == nil {
 		m.issue = nil
 	} else {

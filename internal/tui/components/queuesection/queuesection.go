@@ -192,16 +192,30 @@ func (m *Model) BuildRows() []table.Row {
 	return rows
 }
 
+func StateIcon(state queue.State) string {
+	switch state {
+	case queue.Next, queue.Ready:
+		return "🟢"
+	case queue.Parked:
+		return "🟠"
+	case queue.HITL:
+		return "🟣"
+	default:
+		return "🔴"
+	}
+}
+
 func stateText(entry queue.Entry) string {
+	icon := StateIcon(entry.State)
 	switch entry.State {
 	case queue.Next:
-		return "🟢 Next"
+		return icon + " Next"
 	case queue.Ready:
-		return "🟢 Ready"
+		return icon + " Ready"
 	case queue.Parked:
-		return "🟠 Parked"
+		return icon + " Parked"
 	case queue.HITL:
-		return "🟣 HITL"
+		return icon + " HITL"
 	default:
 		blockers := []string{}
 		for _, b := range entry.Blockers {
@@ -209,7 +223,7 @@ func stateText(entry queue.Entry) string {
 				blockers = append(blockers, blockerText(b))
 			}
 		}
-		return "🔴 Blocked by " + strings.Join(blockers, ", ")
+		return icon + " Blocked by " + strings.Join(blockers, ", ")
 	}
 }
 
@@ -236,6 +250,15 @@ func (m *Model) GetCurrRow() data.RowData {
 	}
 	issue := entries[idx].Issue
 	return &issue
+}
+
+func (m *Model) DependencyTrees() (upstream, downstream queue.Node) {
+	issue, ok := m.GetCurrRow().(*data.IssueData)
+	if !ok {
+		return queue.Node{}, queue.Node{}
+	}
+	return m.shared.analysis.UpstreamTree(issue.Number),
+		m.shared.analysis.DownstreamTree(issue.Number)
 }
 
 func (m *Model) FetchNextPageSectionRows() []tea.Cmd {

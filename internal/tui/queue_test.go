@@ -17,6 +17,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/branchsidebar"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/footer"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuessection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issueview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/queuesection"
@@ -386,4 +387,38 @@ func TestQueueView_UnparkingAnIssueUpdatesBothTabs(t *testing.T) {
 		states = append(states, ansi.Strip(row[0]))
 	}
 	require.Equal(t, []string{"🟢 Next", "🟢 Ready"}, states)
+}
+
+func dependentIssues() []data.IssueData {
+	blocker := queueIssue(2, "")
+	blocker.Title = "[AFK] Lay the rails"
+	waiting := queueIssue(3, "")
+	waiting.Title = "[AFK] Run the train"
+	waiting.Body += "\n\n## Blocked by\n\n- #2\n"
+	return []data.IssueData{blocker, waiting}
+}
+
+func TestQueueView_PreviewShowsTheDependencyTrees(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, dependentIssues()...)
+
+	view := ansi.Strip(m.issueSidebar.View())
+
+	require.Contains(t, view, "Unblocks")
+	require.Contains(t, view, "└─ 🔴 #3 [AFK] Run the train")
+}
+
+func TestIssuesView_PreviewHasNoDependencyTrees(t *testing.T) {
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, dependentIssues()...)
+	m.ctx.View = config.IssuesView
+	m.issues = issuessection.InitSections(m.ctx)
+	m.issues[0].(*issuessection.Model).Issues = dependentIssues()
+
+	m.syncSidebar()
+
+	view := ansi.Strip(m.issueSidebar.View())
+	require.Contains(t, view, "#2 · owner/repo")
+	require.NotContains(t, view, "Unblocks")
+	require.NotContains(t, view, "└─")
 }

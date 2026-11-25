@@ -11,6 +11,9 @@ type Analysis struct {
 	Queue   []Entry
 	NeedsMe []Entry
 	Graph   Graph
+
+	analyzer analyzer
+	states   map[int]State
 }
 
 type analyzer struct {
@@ -56,11 +59,17 @@ func Analyze(
 	slices.SortFunc(needsMe, func(x, y Entry) int {
 		return cmp.Or(cmp.Compare(y.Unblocks, x.Unblocks), cmp.Compare(x.Issue.Number, y.Issue.Number))
 	})
-	return Analysis{
-		Queue:   slices.Concat(a.classify(candidates(openIssues, me)), parked),
-		NeedsMe: needsMe,
-		Graph:   a.graph,
+	analysis := Analysis{
+		Queue:    slices.Concat(a.classify(candidates(openIssues, me)), parked),
+		NeedsMe:  needsMe,
+		Graph:    a.graph,
+		analyzer: a,
+		states:   map[int]State{},
 	}
+	for _, e := range slices.Concat(analysis.Queue, analysis.NeedsMe) {
+		analysis.states[e.Issue.Number] = e.State
+	}
+	return analysis
 }
 
 func (a analyzer) entry(i data.IssueData, state State) Entry {

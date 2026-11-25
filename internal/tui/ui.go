@@ -1023,6 +1023,9 @@ func (m *Model) syncSidebar() tea.Cmd {
 			Type: m.getCurrSection().GetType(),
 		})
 		m.issueSidebar.SetRow(row)
+		if queueTab, ok := m.getCurrSection().(*queuesection.Model); ok {
+			m.issueSidebar.SetDependencies(queueTab.DependencyTrees())
+		}
 		m.issueSidebar.SetWidth(width)
 		m.sidebar.SetContent(m.issueSidebar.View())
 		// Scroll to bottom if in input mode to keep inputbox visible
