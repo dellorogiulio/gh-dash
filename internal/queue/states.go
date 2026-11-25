@@ -13,17 +13,22 @@ const (
 	Next State = iota
 	Ready
 	Blocked
+	Parked
+	HITL
 )
 
 type Blocker struct {
 	Ref
-	Open bool
+	Open   bool
+	HITL   bool
+	Parked bool
 }
 
 type Entry struct {
 	Issue    data.IssueData
 	State    State
 	Blockers []Blocker
+	Unblocks int
 }
 
 func (e Entry) OpenBlockers() []Ref {
@@ -36,32 +41,12 @@ func (e Entry) OpenBlockers() []Ref {
 	return refs
 }
 
-// Classify orders the candidates Next, Ready, then Blocked. A blocker in the
-// launch repo is open iff it is among the open issues; one in another repo is
-// open unless otherRepoStates gives it a state other than OPEN.
-func Classify(
-	candidates, openIssues []data.IssueData,
-	otherRepoStates map[Ref]string,
-	launchOwner, launchRepo string,
-) []Entry {
-	openNumbers := map[int]bool{}
-	for _, i := range openIssues {
-		openNumbers[i.Number] = true
-	}
-
+func (a analyzer) classify(candidates []data.IssueData) []Entry {
 	entries := []Entry{}
 	for _, c := range candidates {
-		entry := Entry{Issue: c, State: Ready}
-		for _, ref := range Blockers(c.Body, launchOwner, launchRepo) {
-			open := openNumbers[ref.Number]
-			if ref.Owner != "" {
-				state, resolved := otherRepoStates[ref]
-				open = !resolved || state == "OPEN"
-			}
-			entry.Blockers = append(entry.Blockers, Blocker{Ref: ref, Open: open})
-			if open {
-				entry.State = Blocked
-			}
+		entry := a.entry(c, Ready)
+		if len(entry.OpenBlockers()) > 0 {
+			entry.State = Blocked
 		}
 		entries = append(entries, entry)
 	}
@@ -73,4 +58,15 @@ func Classify(
 		entries[0].State = Next
 	}
 	return entries
+}
+
+// A blocker in the launch repo is open iff it is among the open issues; one in
+// another repo is open unless otherRepoStates gives it a state other than OPEN.
+func (a analyzer) blocker(ref Ref) Blocker {
+	if ref.Owner != "" {
+		state, resolved := a.otherRepoStates[ref]
+		return Blocker{Ref: ref, Open: !resolved || state == "OPEN"}
+	}
+	i, open := a.open[ref.Number]
+	return Blocker{Ref: ref, Open: open, HITL: isHITL(i), Parked: isParked(i, a.me)}
 }

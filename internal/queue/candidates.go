@@ -1,7 +1,8 @@
 // Package queue mirrors the issue picker of wiq (the work issue queue).
 //
-// The rules follow wiq_candidates in ~/.claude/scripts/wiq-lib.sh, which is
-// the source of truth: change them there first, then here.
+// The candidate rules follow wiq_candidates in ~/.claude/scripts/wiq-lib.sh,
+// which is the source of truth: change them there first, then here. Parked
+// and HITL issues have no wiq counterpart.
 package queue
 
 import (
@@ -11,22 +12,47 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 )
 
-var skipLabels = []string{"blocked", "wontfix", "needs-info", "needs-triage", "hitl"}
+const (
+	parkLabel = "blocked"
+	hitlLabel = "hitl"
+)
+
+var otherSkipLabels = []string{"wontfix", "needs-info", "needs-triage", hitlLabel}
 
 var (
 	hitlTitle     = regexp.MustCompile(`(?i)HITL`)
 	parentHeading = regexp.MustCompile(`## Parent`)
 )
 
-func Candidates(issues []data.IssueData, me string) []data.IssueData {
+func candidates(issues []data.IssueData, me string) []data.IssueData {
 	out := []data.IssueData{}
 	for _, i := range issues {
-		if !hasAnyLabel(i, skipLabels) && !hasHITLTitle(i) && hasParent(i) && isFreeOrMine(i, me) {
+		if isCandidate(i, me) {
 			out = append(out, i)
 		}
 	}
-	slices.SortFunc(out, func(a, b data.IssueData) int { return a.Number - b.Number })
+	slices.SortFunc(out, byNumber)
 	return out
+}
+
+func byNumber(a, b data.IssueData) int {
+	return a.Number - b.Number
+}
+
+func isCandidate(i data.IssueData, me string) bool {
+	return !hasAnyLabel(i, []string{parkLabel}) && qualifies(i, me)
+}
+
+func isParked(i data.IssueData, me string) bool {
+	return hasAnyLabel(i, []string{parkLabel}) && qualifies(i, me)
+}
+
+func qualifies(i data.IssueData, me string) bool {
+	return !hasAnyLabel(i, otherSkipLabels) && !hasHITLTitle(i) && hasParent(i) && isFreeOrMine(i, me)
+}
+
+func isHITL(i data.IssueData) bool {
+	return hasHITLTitle(i) || hasAnyLabel(i, []string{hitlLabel})
 }
 
 func hasAnyLabel(i data.IssueData, names []string) bool {

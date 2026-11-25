@@ -2,6 +2,7 @@ package queuesection
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -135,12 +136,14 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 }
 
 func (m *Model) refilter() {
-	candidates := queue.Candidates(m.openIssues, m.Ctx.User)
 	owner, name := "", ""
 	if m.Ctx.HasGHRepo() {
 		owner, name = m.Ctx.GHRepo.Owner, m.Ctx.GHRepo.Name
 	}
-	m.entries = queue.Classify(candidates, m.openIssues, m.otherRepoStates, owner, name)
+	analysis := queue.Analyze(m.openIssues, m.Ctx.User, m.otherRepoStates, owner, name)
+	m.entries = slices.DeleteFunc(analysis.Queue, func(e queue.Entry) bool {
+		return e.State == queue.Parked
+	})
 	m.filteredFor = m.Ctx.User
 }
 

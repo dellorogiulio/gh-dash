@@ -21,10 +21,12 @@ func issue(number int, title, body string, labels []string, assignees []string) 
 	return i
 }
 
-func numbers(issues []data.IssueData) []int {
+func candidateNumbers(issues []data.IssueData) []int {
 	out := []int{}
-	for _, i := range issues {
-		out = append(out, i.Number)
+	for _, e := range Analyze(issues, "me", nil, "owner", "repo").Queue {
+		if e.State != Parked {
+			out = append(out, e.Issue.Number)
+		}
 	}
 	return out
 }
@@ -40,7 +42,7 @@ func TestCandidatesWiqFixture(t *testing.T) {
 		issue(9, "[AFK] Untagged", parentBody, nil, []string{"me"}),
 	}
 
-	require.Equal(t, []int{2, 3, 9}, numbers(Candidates(fixture, "me")))
+	require.ElementsMatch(t, []int{2, 3, 9}, candidateNumbers(fixture))
 }
 
 func TestCandidatesRules(t *testing.T) {
@@ -67,7 +69,7 @@ func TestCandidatesRules(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Candidates([]data.IssueData{tt.issue}, "me")
+			got := candidateNumbers([]data.IssueData{tt.issue})
 			require.Equal(t, tt.kept, len(got) == 1)
 		})
 	}

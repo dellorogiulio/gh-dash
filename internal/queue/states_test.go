@@ -29,7 +29,7 @@ func rows(entries []Entry) []row {
 	return out
 }
 
-func TestClassify(t *testing.T) {
+func TestAnalyzeQueueOrder(t *testing.T) {
 	tests := []struct {
 		name       string
 		candidates []data.IssueData
@@ -120,7 +120,7 @@ func TestClassify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			open := append(append([]data.IssueData{}, tt.candidates...), tt.others...)
-			entries := Classify(tt.candidates, open, tt.elsewhere, "owner", "repo")
+			entries := Analyze(open, "me", tt.elsewhere, "owner", "repo").Queue
 			require.Equal(t, tt.expected, rows(entries))
 		})
 	}
