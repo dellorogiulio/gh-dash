@@ -3,6 +3,7 @@ package tasks
 import (
 	"fmt"
 	"os/exec"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,6 +20,29 @@ type UpdateIssueMsg struct {
 	IsClosed         *bool
 	AddedAssignees   *data.Assignees
 	RemovedAssignees *data.Assignees
+}
+
+func (msg UpdateIssueMsg) Apply(issue data.IssueData) data.IssueData {
+	if msg.IsClosed != nil {
+		if *msg.IsClosed {
+			issue.State = "CLOSED"
+		} else {
+			issue.State = "OPEN"
+		}
+	}
+	if msg.Labels != nil {
+		issue.Labels.Nodes = msg.Labels.Nodes
+	}
+	if msg.NewComment != nil {
+		issue.Comments.Nodes = append(issue.Comments.Nodes, *msg.NewComment)
+	}
+	if msg.AddedAssignees != nil {
+		issue.Assignees.Nodes = addAssignees(issue.Assignees.Nodes, msg.AddedAssignees.Nodes)
+	}
+	if msg.RemovedAssignees != nil {
+		issue.Assignees.Nodes = removeAssignees(issue.Assignees.Nodes, msg.RemovedAssignees.Nodes)
+	}
+	return issue
 }
 
 func CloseIssue(
@@ -243,4 +267,32 @@ func LabelIssue(
 			}
 		},
 	})
+}
+
+func addAssignees(assignees, addedAssignees []data.Assignee) []data.Assignee {
+	newAssignees := assignees
+	for _, assignee := range addedAssignees {
+		if !assigneesContains(newAssignees, assignee) {
+			newAssignees = append(newAssignees, assignee)
+		}
+	}
+
+	return newAssignees
+}
+
+func removeAssignees(
+	assignees, removedAssignees []data.Assignee,
+) []data.Assignee {
+	newAssignees := []data.Assignee{}
+	for _, assignee := range assignees {
+		if !assigneesContains(removedAssignees, assignee) {
+			newAssignees = append(newAssignees, assignee)
+		}
+	}
+
+	return newAssignees
+}
+
+func assigneesContains(assignees []data.Assignee, assignee data.Assignee) bool {
+	return slices.Contains(assignees, assignee)
 }

@@ -11,12 +11,12 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/queue"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/cmpcontroller"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/fuzzyselect"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/inputbox"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuerow"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuessection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
@@ -31,11 +31,14 @@ var (
 )
 
 type Model struct {
-	ctx       *context.ProgramContext
-	issue     *issuerow.Issue
-	sectionId int
-	width     int
-	editor    cmpcontroller.Controller
+	ctx     *context.ProgramContext
+	issue   *issuerow.Issue
+	section tasks.SectionIdentifier
+	width   int
+	editor  cmpcontroller.Controller
+
+	upstream, downstream queue.Node
+	highlighted          int
 }
 
 func NewModel(ctx *context.ProgramContext) Model {
@@ -43,9 +46,10 @@ func NewModel(ctx *context.ProgramContext) Model {
 	cmp := cmpcontroller.New(ctx, inputbox.ModelOpts{TextArea: &ta})
 
 	return Model{
-		ctx:    ctx,
-		issue:  nil,
-		editor: cmp,
+		ctx:         ctx,
+		issue:       nil,
+		editor:      cmp,
+		highlighted: noHighlight,
 	}
 }
 
@@ -60,26 +64,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd, *IssueAction) {
 			return m, nil, nil
 		}
 
-		sid := tasks.SectionIdentifier{Id: m.sectionId, Type: issuessection.SectionType}
-
 		switch mode {
 		case cmpcontroller.ModeComment:
 			if len(strings.TrimSpace(value)) != 0 {
-				return m, tasks.CommentOnIssue(m.ctx, sid, m.issue.Data, value), nil
+				return m, tasks.CommentOnIssue(m.ctx, m.section, m.issue.Data, value), nil
 			}
 			return m, nil, nil
 
 		case cmpcontroller.ModeAssign:
 			usernames := fuzzyselect.AllWords(value)
 			if len(usernames) > 0 {
-				return m, tasks.AssignIssue(m.ctx, sid, m.issue.Data, usernames), nil
+				return m, tasks.AssignIssue(m.ctx, m.section, m.issue.Data, usernames), nil
 			}
 			return m, nil, nil
 
 		case cmpcontroller.ModeUnassign:
 			usernames := fuzzyselect.AllWords(value)
 			if len(usernames) > 0 {
-				return m, tasks.UnassignIssue(m.ctx, sid, m.issue.Data, usernames), nil
+				return m, tasks.UnassignIssue(m.ctx, m.section, m.issue.Data, usernames), nil
 			}
 			return m, nil, nil
 
@@ -88,7 +90,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd, *IssueAction) {
 			if len(labels) > 0 || len(m.issue.Data.Labels.Nodes) > 0 {
 				return m, tasks.LabelIssue(
 					m.ctx,
-					sid,
+					m.section,
 					m.issue.Data,
 					labels,
 					m.issue.Data.Labels.Nodes,
@@ -139,6 +141,11 @@ func (m Model) View() string {
 	labels := m.renderLabels()
 	if labels != "" {
 		s.WriteString(labels)
+		s.WriteString("\n\n")
+	}
+
+	if dependencies := m.renderDependencies(); dependencies != "" {
+		s.WriteString(dependencies)
 		s.WriteString("\n\n")
 	}
 
@@ -261,11 +268,12 @@ func (m *Model) SetWidth(width int) {
 	)
 }
 
-func (m *Model) SetSectionId(id int) {
-	m.sectionId = id
+func (m *Model) SetSection(section tasks.SectionIdentifier) {
+	m.section = section
 }
 
 func (m *Model) SetRow(data *data.IssueData) {
+	m.upstream, m.downstream = queue.Node{}, queue.Node{}
 	if data == nil {
 		m.issue = nil
 	} else {

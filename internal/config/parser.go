@@ -65,6 +65,8 @@ func (a *ViewType) UnmarshalJSON(b []byte) error {
 		*a = IssuesView
 	case "repo":
 		*a = RepoView
+	case "queue":
+		*a = QueueView
 	}
 
 	return nil
@@ -74,7 +76,16 @@ const (
 	PRsView    ViewType = "prs"
 	IssuesView ViewType = "issues"
 	RepoView   ViewType = "repo"
+	QueueView  ViewType = "queue"
 )
+
+func QueueSectionConfig() SectionConfig {
+	return SectionConfig{Title: "Queue"}
+}
+
+func NeedsMeSectionConfig() SectionConfig {
+	return SectionConfig{Title: "Needs me"}
+}
 
 type SectionConfig struct {
 	Title   string
@@ -822,7 +833,7 @@ func (parser ConfigParser) unmarshalConfigWithDefaults() (Config, error) {
 	}
 
 	switch cfg.Defaults.View {
-	case PRsView, IssuesView:
+	case PRsView, IssuesView, QueueView:
 	case RepoView:
 		if !IsFeatureEnabled(FF_REPO_VIEW) {
 			cfg.Defaults.View = PRsView

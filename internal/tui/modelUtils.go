@@ -76,7 +76,7 @@ func (m *Model) executeKeybinding(key string) tea.Cmd {
 	}
 
 	switch m.ctx.View {
-	case config.IssuesView:
+	case config.IssuesView, config.QueueView:
 		for _, keybinding := range m.ctx.Config.Keybindings.Issues {
 			if keybinding.Key != key {
 				continue
@@ -138,19 +138,9 @@ func resolveTemplateInput(
 		maps.Copy(input, *contextData)
 	}
 
-	// Append in the local RepoPath only if it can be found
-	if input["RepoName"] != nil {
-		if repoPath, ok := common.GetRepoLocalPath(
-			input["RepoName"].(string),
-			repoPaths,
-		); ok {
-			input["RepoPath"] = repoPath
-		}
-	}
-
-	// Fall back to the current repo path if RepoPath was not resolved via repoPaths config
-	if input["RepoPath"] == nil && ctxRepoPath != "" {
-		input["RepoPath"] = ctxRepoPath
+	repoName, _ := input["RepoName"].(string)
+	if repoPath, ok := common.ResolveRepoPath(repoName, repoPaths, ctxRepoPath); ok {
+		input["RepoPath"] = repoPath
 	}
 
 	return input

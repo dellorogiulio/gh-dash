@@ -19,6 +19,8 @@ type IssueKeyMap struct {
 	Reopen               key.Binding
 	ToggleSmartFiltering key.Binding
 	ViewPRs              key.Binding
+	NextDependency       key.Binding
+	JumpToDependency     key.Binding
 }
 
 var IssueKeys = IssueKeyMap{
@@ -58,6 +60,14 @@ var IssueKeys = IssueKeyMap{
 		key.WithKeys("s"),
 		key.WithHelp("s", "switch to PRs"),
 	),
+	NextDependency: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "next dependency"),
+	),
+	JumpToDependency: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "jump to dependency"),
+	),
 }
 
 func IssueFullHelp() []key.Binding {
@@ -72,6 +82,10 @@ func IssueFullHelp() []key.Binding {
 		IssueKeys.ToggleSmartFiltering,
 		IssueKeys.ViewPRs,
 	}
+}
+
+func QueueFullHelp() []key.Binding {
+	return append(IssueFullHelp(), IssueKeys.NextDependency, IssueKeys.JumpToDependency)
 }
 
 func rebindIssueKeys(keys []config.Keybinding) error {
@@ -117,6 +131,10 @@ func rebindIssueKeys(keys []config.Keybinding) error {
 			key = &IssueKeys.Reopen
 		case "viewPrs":
 			key = &IssueKeys.ViewPRs
+		case "nextDependency":
+			key = &IssueKeys.NextDependency
+		case "jumpToDependency":
+			key = &IssueKeys.JumpToDependency
 		default:
 			return fmt.Errorf("unknown built-in issue key: '%s'", issueKey.Builtin)
 		}

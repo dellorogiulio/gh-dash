@@ -1,0 +1,6 @@
+prSections:
+  - title: My Pull Requests
+    filters: is:open author:@me
+
+defaults:
+  view: queue

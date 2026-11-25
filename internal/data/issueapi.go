@@ -103,13 +103,17 @@ func makeIssuesQuery(query string) string {
 	return fmt.Sprintf("is:issue archived:false %s sort:updated", query)
 }
 
-func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, error) {
-	var err error
-	if client == nil {
-		client, err = gh.DefaultGraphQLClient()
+func ensureClient() error {
+	if client != nil {
+		return nil
 	}
+	var err error
+	client, err = gh.DefaultGraphQLClient()
+	return err
+}
 
-	if err != nil {
+func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, error) {
+	if err := ensureClient(); err != nil {
 		return IssuesResponse{}, err
 	}
 
@@ -132,7 +136,7 @@ func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, e
 		"endCursor": (*graphql.String)(endCursor),
 	}
 	log.Debug("Fetching issues", "query", query, "limit", limit, "endCursor", endCursor)
-	err = client.Query("SearchIssues", &queryResult, variables)
+	err := client.Query("SearchIssues", &queryResult, variables)
 	if err != nil {
 		return IssuesResponse{}, err
 	}
@@ -148,6 +152,42 @@ func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, e
 		TotalCount: queryResult.Search.IssueCount,
 		PageInfo:   queryResult.Search.PageInfo,
 	}, nil
+}
+
+func FetchAllOpenIssues(owner, name string) ([]IssueData, error) {
+	if err := ensureClient(); err != nil {
+		return nil, err
+	}
+
+	issues := []IssueData{}
+	var cursor *string
+	for {
+		var queryResult struct {
+			Repository struct {
+				Issues struct {
+					Nodes    []IssueData
+					PageInfo PageInfo
+				} `graphql:"issues(states: OPEN, first: 100, after: $cursor)"`
+			} `graphql:"repository(owner: $owner, name: $name)"`
+		}
+		variables := map[string]any{
+			"owner":  graphql.String(owner),
+			"name":   graphql.String(name),
+			"cursor": (*graphql.String)(cursor),
+		}
+		if err := client.Query("RepositoryOpenIssues", &queryResult, variables); err != nil {
+			return nil, err
+		}
+		issues = append(issues, queryResult.Repository.Issues.Nodes...)
+		pageInfo := queryResult.Repository.Issues.PageInfo
+		if !pageInfo.HasNextPage {
+			break
+		}
+		cursor = &pageInfo.EndCursor
+	}
+	log.Info("Successfully fetched open issues", "repo", owner+"/"+name, "count", len(issues))
+
+	return issues, nil
 }
 
 type IssuesResponse struct {

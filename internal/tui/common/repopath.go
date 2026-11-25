@@ -57,3 +57,16 @@ func GetRepoLocalPath(repoName string, cfgPaths map[string]string) (string, bool
 
 	return "", false
 }
+
+// ResolveRepoPath finds the local path of a repo through the repoPaths config,
+// falling back to the path of the repo gh-dash was launched from.
+func ResolveRepoPath(
+	repoName string,
+	cfgPaths map[string]string,
+	launchRepoPath string,
+) (string, bool) {
+	if path, ok := GetRepoLocalPath(repoName, cfgPaths); ok {
+		return path, true
+	}
+	return launchRepoPath, launchRepoPath != ""
+}
