@@ -34,6 +34,7 @@ func TestClassify(t *testing.T) {
 		name       string
 		candidates []data.IssueData
 		others     []data.IssueData
+		elsewhere  map[Ref]string
 		expected   []row
 	}{
 		{
@@ -66,9 +67,28 @@ func TestClassify(t *testing.T) {
 			expected:   []row{{8, Blocked, []Ref{{Number: 2}, {Number: 5}}}},
 		},
 		{
-			name:       "a blocker in another repo keeps the candidate Blocked",
+			name:       "an unresolved blocker in another repo keeps the candidate Blocked",
 			candidates: []data.IssueData{blockedBy(4, "- other/lib#1")},
+			elsewhere:  map[Ref]string{{Owner: "other", Repo: "lib", Number: 2}: "CLOSED"},
 			expected:   []row{{4, Blocked, []Ref{{Owner: "other", Repo: "lib", Number: 1}}}},
+		},
+		{
+			name:       "an open blocker in another repo keeps the candidate Blocked",
+			candidates: []data.IssueData{blockedBy(4, "- #2\n- other/lib#1")},
+			elsewhere:  map[Ref]string{{Owner: "other", Repo: "lib", Number: 1}: "OPEN"},
+			expected:   []row{{4, Blocked, []Ref{{Owner: "other", Repo: "lib", Number: 1}}}},
+		},
+		{
+			name:       "a closed blocker in another repo frees the candidate",
+			candidates: []data.IssueData{blockedBy(4, "- other/lib#1")},
+			elsewhere:  map[Ref]string{{Owner: "other", Repo: "lib", Number: 1}: "CLOSED"},
+			expected:   []row{{4, Next, nil}},
+		},
+		{
+			name:       "a merged pull request in another repo frees the candidate",
+			candidates: []data.IssueData{blockedBy(4, "- other/lib#1")},
+			elsewhere:  map[Ref]string{{Owner: "other", Repo: "lib", Number: 1}: "MERGED"},
+			expected:   []row{{4, Next, nil}},
 		},
 		{
 			name: "a candidate blocking another one keeps it Blocked",
@@ -100,7 +120,8 @@ func TestClassify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			open := append(append([]data.IssueData{}, tt.candidates...), tt.others...)
-			require.Equal(t, tt.expected, rows(Classify(tt.candidates, open, "owner", "repo")))
+			entries := Classify(tt.candidates, open, tt.elsewhere, "owner", "repo")
+			require.Equal(t, tt.expected, rows(entries))
 		})
 	}
 }

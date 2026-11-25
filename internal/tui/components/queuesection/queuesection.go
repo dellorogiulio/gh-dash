@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/log/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
@@ -24,9 +25,10 @@ const SectionType = "queue"
 
 type Model struct {
 	section.BaseModel
-	openIssues  []data.IssueData
-	entries     []queue.Entry
-	filteredFor string
+	openIssues      []data.IssueData
+	otherRepoStates map[queue.Ref]string
+	entries         []queue.Entry
+	filteredFor     string
 }
 
 var stateColumnWidth = 24
@@ -110,6 +112,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	case SectionQueueFetchedMsg:
 		if m.LastFetch.TaskId == msg.TaskId {
 			m.openIssues = msg.Issues
+			m.otherRepoStates = msg.OtherRepoStates
 			m.refilter()
 			m.PageInfo = &data.PageInfo{}
 			m.SetIsLoading(false)
@@ -137,7 +140,7 @@ func (m *Model) refilter() {
 	if m.Ctx.HasGHRepo() {
 		owner, name = m.Ctx.GHRepo.Owner, m.Ctx.GHRepo.Name
 	}
-	m.entries = queue.Classify(candidates, m.openIssues, owner, name)
+	m.entries = queue.Classify(candidates, m.openIssues, m.otherRepoStates, owner, name)
 	m.filteredFor = m.Ctx.User
 }
 
@@ -231,11 +234,20 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			}
 		}
 
+		otherRepoStates, err := data.FetchIssueStates(queue.OtherRepoBlockers(issues, owner, name))
+		if err != nil {
+			log.Warn("Failed to look up blockers in other repos", "err", err)
+		}
+
 		return constants.TaskFinishedMsg{
 			SectionId:   m.Id,
 			SectionType: m.Type,
 			TaskId:      taskId,
-			Msg:         SectionQueueFetchedMsg{Issues: issues, TaskId: taskId},
+			Msg: SectionQueueFetchedMsg{
+				Issues:          issues,
+				OtherRepoStates: otherRepoStates,
+				TaskId:          taskId,
+			},
 		}
 	}
 
@@ -268,8 +280,9 @@ func FetchAllSections(ctx *context.ProgramContext, existing []section.Section) t
 }
 
 type SectionQueueFetchedMsg struct {
-	Issues []data.IssueData
-	TaskId string
+	Issues          []data.IssueData
+	OtherRepoStates map[queue.Ref]string
+	TaskId          string
 }
 
 func (m Model) GetItemSingularForm() string {

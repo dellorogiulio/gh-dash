@@ -1,26 +1,15 @@
 package queue
 
 import (
-	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/dlvhdr/gh-dash/v4/internal/data"
 )
 
-// Ref names an issue. Owner and Repo are empty for an issue of the launch repo.
-type Ref struct {
-	Owner  string
-	Repo   string
-	Number int
-}
-
-func (r Ref) String() string {
-	if r.Owner == "" {
-		return fmt.Sprintf("#%d", r.Number)
-	}
-	return fmt.Sprintf("%s/%s#%d", r.Owner, r.Repo, r.Number)
-}
+type Ref = data.IssueRef
 
 const repoPattern = `([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)`
 
@@ -82,4 +71,18 @@ func blockedBySection(body string) string {
 		}
 	}
 	return strings.Join(section, "\n")
+}
+
+// OtherRepoBlockers lists, once each, the blockers of the issues that live
+// outside the launch repo.
+func OtherRepoBlockers(issues []data.IssueData, launchOwner, launchRepo string) []Ref {
+	var refs []Ref
+	for _, i := range issues {
+		for _, ref := range Blockers(i.Body, launchOwner, launchRepo) {
+			if ref.Owner != "" && !slices.Contains(refs, ref) {
+				refs = append(refs, ref)
+			}
+		}
+	}
+	return refs
 }

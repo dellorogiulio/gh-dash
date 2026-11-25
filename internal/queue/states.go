@@ -38,9 +38,10 @@ func (e Entry) OpenBlockers() []Ref {
 
 // Classify orders the candidates Next, Ready, then Blocked. A blocker in the
 // launch repo is open iff it is among the open issues; one in another repo is
-// taken as open.
+// open unless otherRepoStates gives it a state other than OPEN.
 func Classify(
 	candidates, openIssues []data.IssueData,
+	otherRepoStates map[Ref]string,
 	launchOwner, launchRepo string,
 ) []Entry {
 	openNumbers := map[int]bool{}
@@ -52,7 +53,11 @@ func Classify(
 	for _, c := range candidates {
 		entry := Entry{Issue: c, State: Ready}
 		for _, ref := range Blockers(c.Body, launchOwner, launchRepo) {
-			open := ref.Owner != "" || openNumbers[ref.Number]
+			open := openNumbers[ref.Number]
+			if ref.Owner != "" {
+				state, resolved := otherRepoStates[ref]
+				open = !resolved || state == "OPEN"
+			}
 			entry.Blockers = append(entry.Blockers, Blocker{Ref: ref, Open: open})
 			if open {
 				entry.State = Blocked

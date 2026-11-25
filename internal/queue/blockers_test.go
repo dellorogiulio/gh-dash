@@ -1,9 +1,12 @@
 package queue
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dlvhdr/gh-dash/v4/internal/data"
 )
 
 func TestBlockers(t *testing.T) {
@@ -89,10 +92,40 @@ func TestBlockers(t *testing.T) {
 			name: "no Blocked by section lists none",
 			body: "## Parent\n\n#1\n",
 		},
+		{
+			name:     "a number beyond 32 bits is kept",
+			body:     "## Blocked by\n\n- other/lib#99999999999\n",
+			expected: []Ref{{Owner: "other", Repo: "lib", Number: 99999999999}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.expected, Blockers(tt.body, "owner", "repo"))
 		})
 	}
+}
+
+func TestBlockersKeepANumberBeyond64BitsOutOfLookupRange(t *testing.T) {
+	refs := Blockers("## Blocked by\n\n- other/lib#123456789012345678901234567890\n", "owner", "repo")
+
+	require.Len(t, refs, 1)
+	require.Equal(t, "other/lib", refs[0].Owner+"/"+refs[0].Repo)
+	require.False(t, 1 <= refs[0].Number && refs[0].Number <= math.MaxInt32)
+}
+
+func TestOtherRepoBlockers(t *testing.T) {
+	blockedBy := func(blockers string) data.IssueData {
+		return data.IssueData{Body: "## Blocked by\n\n" + blockers + "\n"}
+	}
+	issues := []data.IssueData{
+		blockedBy("- #2\n- other/lib#1"),
+		blockedBy("- https://github.com/Owner/Repo/issues/3\n- other/lib#1\n- other/app#7"),
+		blockedBy("None - can start immediately"),
+		blockedBy("- owner/repo#4\n- https://github.com/other/app/issues/7"),
+	}
+
+	require.Equal(t, []Ref{
+		{Owner: "other", Repo: "lib", Number: 1},
+		{Owner: "other", Repo: "app", Number: 7},
+	}, OtherRepoBlockers(issues, "owner", "repo"))
 }
