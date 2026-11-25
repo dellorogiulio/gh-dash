@@ -2,6 +2,7 @@ package queuesection
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,6 +10,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/queue"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuerow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuessection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
@@ -23,9 +25,11 @@ const SectionType = "queue"
 type Model struct {
 	section.BaseModel
 	openIssues  []data.IssueData
-	candidates  []data.IssueData
+	entries     []queue.Entry
 	filteredFor string
 }
+
+var stateColumnWidth = 24
 
 func NewModel(
 	id int,
@@ -37,10 +41,13 @@ func NewModel(
 	m.BaseModel = section.NewModel(
 		ctx,
 		section.NewSectionOptions{
-			Id:          id,
-			Config:      config.QueueSectionConfig(),
-			Type:        SectionType,
-			Columns:     issuessection.GetSectionColumns(config.IssuesSectionConfig{}, ctx),
+			Id:     id,
+			Config: config.QueueSectionConfig(),
+			Type:   SectionType,
+			Columns: append(
+				[]table.Column{{Title: "State", Width: &stateColumnWidth}},
+				issuessection.GetSectionColumns(config.IssuesSectionConfig{}, ctx)...,
+			),
 			Singular:    m.GetItemSingularForm(),
 			Plural:      m.GetItemPluralForm(),
 			LastUpdated: lastUpdated,
@@ -125,45 +132,66 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 }
 
 func (m *Model) refilter() {
-	m.candidates = queue.Candidates(m.openIssues, m.Ctx.User)
+	candidates := queue.Candidates(m.openIssues, m.Ctx.User)
+	owner, name := "", ""
+	if m.Ctx.HasGHRepo() {
+		owner, name = m.Ctx.GHRepo.Owner, m.Ctx.GHRepo.Name
+	}
+	m.entries = queue.Classify(candidates, m.openIssues, owner, name)
 	m.filteredFor = m.Ctx.User
 }
 
 // The login is fetched in parallel with the issues, so candidates are
 // recomputed once it arrives.
-func (m *Model) issues() []data.IssueData {
+func (m *Model) queueEntries() []queue.Entry {
 	if m.filteredFor != m.Ctx.User {
 		m.refilter()
 	}
-	return m.candidates
+	return m.entries
 }
 
 func (m *Model) BuildRows() []table.Row {
 	rows := []table.Row{}
 	currItem := m.Table.GetCurrItem()
-	for i, currIssue := range m.issues() {
+	for i, entry := range m.queueEntries() {
 		issueModel := issuerow.Issue{
 			Ctx:            m.Ctx,
-			Data:           currIssue,
+			Data:           entry.Issue,
 			ShowAuthorIcon: m.ShowAuthorIcon,
-			Columns:        m.Table.Columns,
+			Columns:        m.Table.Columns[1:],
 		}
-		rows = append(rows, issueModel.ToTableRow(currItem == i))
+		state := components.GetIssueTextStyle(m.Ctx).Render(stateText(entry))
+		rows = append(rows, append(table.Row{state}, issueModel.ToTableRow(currItem == i)...))
 	}
 	return rows
 }
 
+func stateText(entry queue.Entry) string {
+	switch entry.State {
+	case queue.Next:
+		return "🟢 Next"
+	case queue.Ready:
+		return "🟢 Ready"
+	default:
+		blockers := []string{}
+		for _, ref := range entry.OpenBlockers() {
+			blockers = append(blockers, ref.String())
+		}
+		return "🔴 Blocked by " + strings.Join(blockers, ", ")
+	}
+}
+
 func (m *Model) NumRows() int {
-	return len(m.issues())
+	return len(m.queueEntries())
 }
 
 func (m *Model) GetCurrRow() data.RowData {
-	issues := m.issues()
+	entries := m.queueEntries()
 	idx := m.Table.GetCurrItem()
-	if idx < 0 || idx >= len(issues) {
+	if idx < 0 || idx >= len(entries) {
 		return nil
 	}
-	issue := issues[idx]
+	issue := entries[idx].Issue
 	return &issue
 }
 
@@ -253,7 +281,7 @@ func (m Model) GetItemPluralForm() string {
 }
 
 func (m *Model) GetTotalCount() int {
-	return len(m.issues())
+	return len(m.queueEntries())
 }
 
 func (m *Model) GetPagerContent() string {

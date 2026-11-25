@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/cli/go-gh/v2/pkg/repository"
 	"github.com/stretchr/testify/require"
 
@@ -116,4 +117,34 @@ func TestQueueWithoutGHRepoIsEmpty(t *testing.T) {
 	require.Nil(t, m.FetchNextPageSectionRows())
 	require.False(t, m.GetIsLoading())
 	require.Zero(t, m.NumRows())
+}
+
+func TestQueueRowsShowStates(t *testing.T) {
+	ctx := newTestContext(t, "me")
+	m := new(NewModel(0, ctx, time.Now(), time.Now()))
+	withBlockers := func(number int, blockers string) data.IssueData {
+		i := issue(number, "")
+		i.Body += "\n\n## Blocked by\n\n" + blockers + "\n"
+		return i
+	}
+
+	receiveOpenIssues(m, []data.IssueData{
+		withBlockers(2, "- #5\n- #8\n- other/lib#3"),
+		withBlockers(3, "None - can start immediately"),
+		withBlockers(5, "- #1"),
+		withBlockers(6, "- #4"),
+		{Number: 8, Title: "not a candidate"},
+	})
+
+	require.Equal(t, []int{3, 5, 6, 2}, rowNumbers(m))
+	states := []string{}
+	for _, row := range m.Table.Rows {
+		states = append(states, ansi.Strip(row[0]))
+	}
+	require.Equal(t, []string{
+		"🟢 Next",
+		"🟢 Ready",
+		"🟢 Ready",
+		"🔴 Blocked by #5, #8, other/lib#3",
+	}, states)
 }
