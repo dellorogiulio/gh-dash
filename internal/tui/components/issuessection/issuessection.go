@@ -2,7 +2,6 @@ package issuessection
 
 import (
 	"fmt"
-	"slices"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -124,28 +123,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	case tasks.UpdateIssueMsg:
 		for i, currIssue := range m.Issues {
 			if currIssue.Number == msg.IssueNumber {
-				if msg.IsClosed != nil {
-					if *msg.IsClosed {
-						currIssue.State = "CLOSED"
-					} else {
-						currIssue.State = "OPEN"
-					}
-				}
-				if msg.Labels != nil {
-					currIssue.Labels.Nodes = msg.Labels.Nodes
-				}
-				if msg.NewComment != nil {
-					currIssue.Comments.Nodes = append(currIssue.Comments.Nodes, *msg.NewComment)
-				}
-				if msg.AddedAssignees != nil {
-					currIssue.Assignees.Nodes = addAssignees(
-						currIssue.Assignees.Nodes, msg.AddedAssignees.Nodes)
-				}
-				if msg.RemovedAssignees != nil {
-					currIssue.Assignees.Nodes = removeAssignees(
-						currIssue.Assignees.Nodes, msg.RemovedAssignees.Nodes)
-				}
-				m.Issues[i] = currIssue
+				m.Issues[i] = msg.Apply(currIssue)
 				m.SetIsLoading(false)
 				m.Table.SetRows(m.BuildRows())
 				break
@@ -406,34 +384,6 @@ type SectionIssuesFetchedMsg struct {
 	TotalCount int
 	PageInfo   data.PageInfo
 	TaskId     string
-}
-
-func addAssignees(assignees, addedAssignees []data.Assignee) []data.Assignee {
-	newAssignees := assignees
-	for _, assignee := range addedAssignees {
-		if !assigneesContains(newAssignees, assignee) {
-			newAssignees = append(newAssignees, assignee)
-		}
-	}
-
-	return newAssignees
-}
-
-func removeAssignees(
-	assignees, removedAssignees []data.Assignee,
-) []data.Assignee {
-	newAssignees := []data.Assignee{}
-	for _, assignee := range assignees {
-		if !assigneesContains(removedAssignees, assignee) {
-			newAssignees = append(newAssignees, assignee)
-		}
-	}
-
-	return newAssignees
-}
-
-func assigneesContains(assignees []data.Assignee, assignee data.Assignee) bool {
-	return slices.Contains(assignees, assignee)
 }
 
 func (m Model) GetItemSingularForm() string {

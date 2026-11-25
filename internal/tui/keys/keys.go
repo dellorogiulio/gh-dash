@@ -60,7 +60,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	case config.RepoView:
 		additionalKeys = BranchFullHelp()
 		customKeys = append(customKeys, CustomBranchBindings...)
-	default:
+	case config.IssuesView, config.QueueView:
 		additionalKeys = IssueFullHelp()
 		customKeys = append(customKeys, CustomIssueBindings...)
 	}

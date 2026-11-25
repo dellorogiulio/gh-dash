@@ -16,7 +16,6 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/fuzzyselect"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/inputbox"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuerow"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuessection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
@@ -31,11 +30,11 @@ var (
 )
 
 type Model struct {
-	ctx       *context.ProgramContext
-	issue     *issuerow.Issue
-	sectionId int
-	width     int
-	editor    cmpcontroller.Controller
+	ctx     *context.ProgramContext
+	issue   *issuerow.Issue
+	section tasks.SectionIdentifier
+	width   int
+	editor  cmpcontroller.Controller
 }
 
 func NewModel(ctx *context.ProgramContext) Model {
@@ -60,26 +59,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd, *IssueAction) {
 			return m, nil, nil
 		}
 
-		sid := tasks.SectionIdentifier{Id: m.sectionId, Type: issuessection.SectionType}
-
 		switch mode {
 		case cmpcontroller.ModeComment:
 			if len(strings.TrimSpace(value)) != 0 {
-				return m, tasks.CommentOnIssue(m.ctx, sid, m.issue.Data, value), nil
+				return m, tasks.CommentOnIssue(m.ctx, m.section, m.issue.Data, value), nil
 			}
 			return m, nil, nil
 
 		case cmpcontroller.ModeAssign:
 			usernames := fuzzyselect.AllWords(value)
 			if len(usernames) > 0 {
-				return m, tasks.AssignIssue(m.ctx, sid, m.issue.Data, usernames), nil
+				return m, tasks.AssignIssue(m.ctx, m.section, m.issue.Data, usernames), nil
 			}
 			return m, nil, nil
 
 		case cmpcontroller.ModeUnassign:
 			usernames := fuzzyselect.AllWords(value)
 			if len(usernames) > 0 {
-				return m, tasks.UnassignIssue(m.ctx, sid, m.issue.Data, usernames), nil
+				return m, tasks.UnassignIssue(m.ctx, m.section, m.issue.Data, usernames), nil
 			}
 			return m, nil, nil
 
@@ -88,7 +85,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd, *IssueAction) {
 			if len(labels) > 0 || len(m.issue.Data.Labels.Nodes) > 0 {
 				return m, tasks.LabelIssue(
 					m.ctx,
-					sid,
+					m.section,
 					m.issue.Data,
 					labels,
 					m.issue.Data.Labels.Nodes,
@@ -261,8 +258,8 @@ func (m *Model) SetWidth(width int) {
 	)
 }
 
-func (m *Model) SetSectionId(id int) {
-	m.sectionId = id
+func (m *Model) SetSection(section tasks.SectionIdentifier) {
+	m.section = section
 }
 
 func (m *Model) SetRow(data *data.IssueData) {

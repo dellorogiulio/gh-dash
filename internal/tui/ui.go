@@ -35,10 +35,12 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prssection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prview"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/queuesection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/reposection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/sidebar"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tabs"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
@@ -57,6 +59,7 @@ type Model struct {
 	repo             section.Section
 	prs              []section.Section
 	issues           []section.Section
+	queue            []section.Section
 	tabs             tabs.Model
 	ctx              *context.ProgramContext
 	taskSpinner      spinner.Model
@@ -475,7 +478,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncSidebar()
 				return m, nil
 			}
-		case m.ctx.View == config.IssuesView:
+		case m.ctx.View == config.IssuesView || m.ctx.View == config.QueueView:
 			switch {
 			case key.Matches(msg, m.keys.OpenGithub):
 				cmds = append(cmds, m.openBrowser())
@@ -859,6 +862,9 @@ func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
 	case issuessection.SectionType:
 		updatedSection, cmd = m.issues[id].Update(msg)
 		m.issues[id] = updatedSection
+	case queuesection.SectionType:
+		updatedSection, cmd = m.queue[id].Update(msg)
+		m.queue[id] = updatedSection
 	}
 
 	currSection := m.getCurrSection()
@@ -1012,7 +1018,10 @@ func (m *Model) syncSidebar() tea.Cmd {
 			m.sidebar.ScrollToBottom()
 		}
 	case *data.IssueData:
-		m.issueSidebar.SetSectionId(m.currSectionId)
+		m.issueSidebar.SetSection(tasks.SectionIdentifier{
+			Id:   m.currSectionId,
+			Type: m.getCurrSection().GetType(),
+		})
 		m.issueSidebar.SetRow(row)
 		m.issueSidebar.SetWidth(width)
 		m.sidebar.SetContent(m.issueSidebar.View())
@@ -1040,6 +1049,9 @@ func (m *Model) fetchAllViewSections() tea.Cmd {
 		prcmds := prssection.FetchAllSections(m.ctx, m.prs)
 		cmds = append(cmds, prcmds)
 		return tea.Batch(cmds...)
+	case config.QueueView:
+		cmds = append(cmds, queuesection.FetchAllSections(m.ctx, m.queue))
+		return tea.Batch(cmds...)
 	default:
 		issuecmds := issuessection.FetchAllSections(m.ctx, m.issues)
 		cmds = append(cmds, issuecmds)
@@ -1056,6 +1068,8 @@ func (m *Model) getCurrentViewSections() []section.Section {
 		return []section.Section{m.repo}
 	case config.PRsView:
 		return m.prs
+	case config.QueueView:
+		return m.queue
 	default:
 		return m.issues
 	}
@@ -1073,6 +1087,8 @@ func (m *Model) switchSelectedView() tea.Cmd {
 	case config.PRsView:
 		m.ctx.View = config.IssuesView
 	case config.IssuesView:
+		m.ctx.View = config.QueueView
+	case config.QueueView:
 		if repoFF {
 			m.ctx.View = config.RepoView
 		} else {
@@ -1105,7 +1121,7 @@ func (m *Model) isUserDefinedKeybinding(msg tea.KeyMsg) bool {
 		}
 	}
 
-	if m.ctx.View == config.IssuesView {
+	if m.ctx.View == config.IssuesView || m.ctx.View == config.QueueView {
 		for _, keybinding := range m.ctx.Config.Keybindings.Issues {
 			if keybinding.Builtin == "" && keybinding.Key == msg.String() {
 				return true
@@ -1297,6 +1313,7 @@ func (m *Model) removeSection() {
 func (m *Model) initSections() {
 	m.prs = prssection.InitSections(m.ctx)
 	m.issues = issuessection.InitSections(m.ctx)
+	m.queue = queuesection.InitSections(m.ctx)
 }
 
 func (m *Model) isViewSectionsStale() bool {

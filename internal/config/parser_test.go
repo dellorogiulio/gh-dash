@@ -266,3 +266,26 @@ func setupConfigEnvVar(t *testing.T) func() {
 		os.Unsetenv("GH_DASH_CONFIG")
 	}
 }
+
+func TestDefaultView(t *testing.T) {
+	cwd := Testwd(t)
+	tests := []struct {
+		name       string
+		configFile string
+		expected   ViewType
+	}{
+		{name: "queue", configFile: "testdata/queue-view-config.yml", expected: QueueView},
+		{name: "existing config", configFile: "testdata/other-test-config.yml", expected: PRsView},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := ParseConfig(Location{
+				ConfigFlag:       path.Join(cwd, tc.configFile),
+				SkipGlobalConfig: true,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, parsed.Defaults.View)
+		})
+	}
+}

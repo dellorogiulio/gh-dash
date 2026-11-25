@@ -76,7 +76,7 @@ func (m *Model) executeKeybinding(key string) tea.Cmd {
 	}
 
 	switch m.ctx.View {
-	case config.IssuesView:
+	case config.IssuesView, config.QueueView:
 		for _, keybinding := range m.ctx.Config.Keybindings.Issues {
 			if keybinding.Key != key {
 				continue
