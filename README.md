@@ -1,11 +1,7 @@
 <br />
 <p align="center">
   <a  class="underline: none;" href="https://gh-dash.dev">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="./docs/public/logo.png">
-      <img alt="Text changing depending on mode. Light: 'So light!' Dark: 'So dark!'" width="600" src="./docs/public/logo-light.png">
-    </picture>
-  </a>
+    </a>
 </p>
 
 <p align="center">
@@ -22,8 +18,6 @@
 </p>
 
 <br />
-
-<img src="./docs/src/assets/overview.gif" />
 
 ## ❤️ Sponsoring
 
@@ -83,18 +77,6 @@ Thank you to all past and existing sponsors! 🙏🏽
 - Control every setting with a YAML config file
 
 If you like quickly navigating with your keyboard, seeing the PRs and issues you need and you <strong>love the terminal</strong> - <code>DASH</code> is for you! 🫵🏽
-
-## 📃 Docs
-
-`DASH` has an extensive docs site at [gh-dash.dev/getting-started](https://gh-dash.dev/getting-started).
-
-## 👥 Discord
-
-Have questions? Join our [Discord community](https://discord.gg/SXNXp9NctV)!
-
-## 🙏 Contributing
-
-See the contribution guide at [https://www.gh-dash.dev/contributing](https://www.gh-dash.dev/contributing/).
 
 ## 🛞 Under the hood
 

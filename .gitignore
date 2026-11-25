@@ -6,7 +6,6 @@ gh-prs
 /result*
 .DS_Store
 .killgrave.log
-docs/broken-links.log
 .devbox/
 __debug*
 testdata/gh-schema.graphql
