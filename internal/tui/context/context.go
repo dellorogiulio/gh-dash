@@ -80,7 +80,7 @@ func (ctx *ProgramContext) GetViewSectionsConfig() []config.SectionConfig {
 			configs = append(configs, cfg.ToSectionConfig())
 		}
 	case config.QueueView:
-		configs = append(configs, config.QueueSectionConfig())
+		configs = append(configs, config.QueueSectionConfig(), config.NeedsMeSectionConfig())
 	}
 
 	return append([]config.SectionConfig{{Title: ""}}, configs...)

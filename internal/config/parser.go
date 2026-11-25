@@ -83,6 +83,10 @@ func QueueSectionConfig() SectionConfig {
 	return SectionConfig{Title: "Queue"}
 }
 
+func NeedsMeSectionConfig() SectionConfig {
+	return SectionConfig{Title: "Needs me"}
+}
+
 type SectionConfig struct {
 	Title   string
 	Filters string

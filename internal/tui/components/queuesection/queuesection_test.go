@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/theme"
@@ -64,6 +64,17 @@ var openIssues = []data.IssueData{
 	{Number: 3, Title: "no parent"},
 }
 
+func newTabs(t *testing.T, user string) (queueTab, needsMeTab *Model) {
+	t.Helper()
+	tabs := InitSections(newTestContext(t, user))
+	require.Len(t, tabs, 2)
+	return tabs[0].(*Model), tabs[1].(*Model)
+}
+
+func newQueueTab(ctx *context.ProgramContext) *Model {
+	return InitSections(ctx)[0].(*Model)
+}
+
 func receiveOpenIssues(m *Model, issues []data.IssueData) {
 	m.FetchNextPageSectionRows()
 	m.Update(SectionQueueFetchedMsg{Issues: issues, TaskId: m.LastFetch.TaskId})
@@ -90,21 +101,21 @@ func TestQueueRows(t *testing.T) {
 		{
 			name:          "login known before the issues",
 			loginAtFetch:  "me",
-			expectedFirst: []int{2, 5, 9},
+			expectedFirst: []int{2, 5, 9, 4},
 		},
 		{
 			name:          "login arrives after the issues",
 			loginAtFetch:  "",
-			expectedFirst: []int{2, 9},
+			expectedFirst: []int{2, 9, 4},
 			loginLater:    "me",
-			expectedLater: []int{2, 5, 9},
+			expectedLater: []int{2, 5, 9, 4},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := newTestContext(t, tc.loginAtFetch)
-			m := new(NewModel(0, ctx, time.Now(), time.Now()))
+			m := newQueueTab(ctx)
 
 			receiveOpenIssues(m, openIssues)
 			require.Equal(t, tc.expectedFirst, rowNumbers(m))
@@ -122,7 +133,7 @@ func TestQueueRows(t *testing.T) {
 func TestQueueWithoutGHRepoIsEmpty(t *testing.T) {
 	ctx := newTestContext(t, "me")
 	ctx.GHRepo = nil
-	m := new(NewModel(0, ctx, time.Now(), time.Now()))
+	m := newQueueTab(ctx)
 
 	require.Nil(t, m.FetchNextPageSectionRows())
 	require.False(t, m.GetIsLoading())
@@ -131,28 +142,160 @@ func TestQueueWithoutGHRepoIsEmpty(t *testing.T) {
 
 func TestQueueRowsShowStates(t *testing.T) {
 	ctx := newTestContext(t, "me")
-	m := new(NewModel(0, ctx, time.Now(), time.Now()))
-	withBlockers := func(number int, blockers string) data.IssueData {
-		i := issue(number, "")
-		i.Body += "\n\n## Blocked by\n\n" + blockers + "\n"
-		return i
-	}
+	m := newQueueTab(ctx)
 
 	receiveOpenIssues(m, []data.IssueData{
-		withBlockers(2, "- #5\n- #8\n- other/lib#3"),
-		withBlockers(3, "None - can start immediately"),
-		withBlockers(5, "- #1"),
-		withBlockers(6, "- #4"),
+		blockedBy(2, "- #5\n- #8\n- other/lib#3"),
+		blockedBy(3, "None - can start immediately"),
+		blockedBy(5, "- #1"),
+		blockedBy(6, "- #4"),
 		{Number: 8, Title: "not a candidate"},
+		issue(9, "", "blocked"),
 	})
 
-	require.Equal(t, []int{3, 5, 6, 2}, rowNumbers(m))
+	require.Equal(t, []int{3, 5, 6, 2, 9}, rowNumbers(m))
 	require.Equal(t, []string{
 		"🟢 Next",
 		"🟢 Ready",
 		"🟢 Ready",
 		"🔴 Blocked by #5, #8, other/lib#3",
+		"🟠 Parked",
 	}, stateTexts(m))
+}
+
+func TestQueueBlockerListsMarkHITLAndParkedBlockers(t *testing.T) {
+	m := newQueueTab(newTestContext(t, "me"))
+
+	receiveOpenIssues(m, []data.IssueData{
+		blockedBy(2, "- #4\n- #9\n- #7"),
+		issue(4, "", "hitl"),
+		issue(7, "someone-else"),
+		issue(9, "", "blocked"),
+	})
+
+	require.Equal(t, "🔴 Blocked by #4 (HITL), #9 (parked), #7", stateTexts(m)[0])
+}
+
+func blockedBy(number int, blockers string) data.IssueData {
+	i := issue(number, "")
+	i.Body += "\n\n## Blocked by\n\n" + blockers + "\n"
+	return i
+}
+
+func columnTexts(m *Model, column int) []string {
+	texts := []string{}
+	for _, row := range m.Table.Rows {
+		texts = append(texts, ansi.Strip(row[column]))
+	}
+	return texts
+}
+
+func TestQueueRowsShowHowManyIssuesTheyUnblock(t *testing.T) {
+	m := newQueueTab(newTestContext(t, "me"))
+
+	receiveOpenIssues(m, []data.IssueData{
+		issue(189, ""),
+		blockedBy(195, "- #189"),
+		blockedBy(196, "- #195"),
+		blockedBy(300, "- #301"),
+		blockedBy(301, "- #300"),
+	})
+
+	require.Equal(t, []int{189, 195, 196, 300, 301}, rowNumbers(m))
+	require.Equal(t, []string{"2", "1", "0", "1", "1"}, columnTexts(m, 1))
+}
+
+func TestNeedsMeTabListsParkedAndBlockingHITLIssuesNextToTheQueue(t *testing.T) {
+	serveGitHub(t, []data.IssueData{
+		issue(3, ""),
+		blockedBy(2, "- #4\n- #6"),
+		issue(4, "", "blocked"),
+		issue(5, "", "blocked"),
+		issue(6, "", "hitl"),
+		issue(7, "", "hitl"),
+		issue(189, "", "hitl"),
+		blockedBy(195, "- #189"),
+		blockedBy(196, "- #195"),
+		blockedBy(300, "- #301"),
+		blockedBy(301, "- #300"),
+	}, answerState("OPEN"))
+	queueTab, needsMeTab := newTabs(t, "me")
+
+	fetch(t, queueTab)
+
+	require.Equal(t, []int{3, 2, 195, 196, 300, 301, 4, 5}, rowNumbers(queueTab))
+	require.Equal(t, []string{"0", "0", "1", "0", "1", "1", "1", "0"}, columnTexts(queueTab, 1))
+	require.Equal(t, []int{189, 4, 6, 5}, rowNumbers(needsMeTab))
+	require.Equal(t,
+		[]string{"🟣 HITL", "🟠 Parked", "🟣 HITL", "🟠 Parked"},
+		stateTexts(needsMeTab),
+	)
+	require.Equal(t, []string{"2", "1", "1", "0"}, columnTexts(needsMeTab, 1))
+}
+
+func TestRefreshFetchesOnceForBothTabs(t *testing.T) {
+	tests := []struct {
+		name    string
+		refresh func(queueTab, needsMeTab *Model) tea.Cmd
+	}{
+		{
+			name: "all tabs",
+			refresh: func(queueTab, needsMeTab *Model) tea.Cmd {
+				return FetchAllSections(queueTab.Ctx, []section.Section{queueTab, needsMeTab})
+			},
+		},
+		{
+			name: "from the Needs me tab",
+			refresh: func(_, needsMeTab *Model) tea.Cmd {
+				needsMeTab.ResetRows()
+				return tea.Batch(needsMeTab.FetchNextPageSectionRows()...)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := serveGitHub(t, []data.IssueData{
+				blockedBy(2, "- other/lib#1"),
+				issue(4, "", "blocked"),
+			}, answerState("OPEN"))
+			queueTab, needsMeTab := newTabs(t, "me")
+			tabs := []*Model{queueTab, needsMeTab}
+
+			finished := taskFinishedFrom(t, tc.refresh(queueTab, needsMeTab))
+			require.True(t, queueTab.GetIsLoading())
+			require.True(t, needsMeTab.GetIsLoading())
+			tabs[finished.SectionId].Update(finished.Msg)
+
+			require.Equal(t, queryCounts{openIssues: 1, states: 1}, *queries)
+			require.False(t, queueTab.GetIsLoading())
+			require.False(t, needsMeTab.GetIsLoading())
+			require.Equal(t, []int{2, 4}, rowNumbers(queueTab))
+			require.Equal(t, []int{4}, rowNumbers(needsMeTab))
+		})
+	}
+}
+
+// taskFinishedFrom runs cmd, and the commands it batches, until one reports
+// a finished task.
+func taskFinishedFrom(t *testing.T, cmd tea.Cmd) constants.TaskFinishedMsg {
+	t.Helper()
+	var finished []constants.TaskFinishedMsg
+	pending := []tea.Cmd{cmd}
+	for len(pending) > 0 {
+		next := pending[0]
+		pending = pending[1:]
+		if next == nil {
+			continue
+		}
+		switch msg := next().(type) {
+		case tea.BatchMsg:
+			pending = append(pending, msg...)
+		case constants.TaskFinishedMsg:
+			finished = append(finished, msg)
+		}
+	}
+	require.Len(t, finished, 1)
+	return finished[0]
 }
 
 type handlerTransport http.HandlerFunc
@@ -165,15 +308,19 @@ func (h handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+type queryCounts struct {
+	openIssues, states int
+}
+
 // serveGitHub answers the open issues query with issues, and the batched
-// state query with statesResponse; it returns how many state queries came in.
+// state query with statesResponse; it counts the queries that came in.
 func serveGitHub(
 	t *testing.T,
 	issues []data.IssueData,
 	statesResponse http.HandlerFunc,
-) *int {
+) *queryCounts {
 	t.Helper()
-	stateQueries := 0
+	queries := &queryCounts{}
 	c, err := gh.NewGraphQLClient(gh.ClientOptions{
 		Host:      "localhost:3000",
 		AuthToken: "fake-token",
@@ -183,17 +330,21 @@ func serveGitHub(
 			var body struct{ Query string }
 			require.NoError(t, json.Unmarshal(raw, &body))
 			if strings.Contains(body.Query, "IssueStates") {
-				stateQueries++
+				queries.states++
 				req.Body = io.NopCloser(bytes.NewReader(raw))
 				statesResponse(w, req)
 				return
 			}
+			queries.openIssues++
 			nodes := []map[string]any{}
 			for _, i := range issues {
-				nodes = append(
-					nodes,
-					map[string]any{"number": i.Number, "title": i.Title, "body": i.Body},
-				)
+				nodes = append(nodes, map[string]any{
+					"number":    i.Number,
+					"title":     i.Title,
+					"body":      i.Body,
+					"labels":    i.Labels,
+					"assignees": i.Assignees,
+				})
 			}
 			writeJSON(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{
 				"issues": map[string]any{"nodes": nodes, "pageInfo": map[string]any{}},
@@ -203,7 +354,7 @@ func serveGitHub(
 	require.NoError(t, err)
 	data.SetClient(c)
 	t.Cleanup(func() { data.SetClient(nil) })
-	return &stateQueries
+	return queries
 }
 
 func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
@@ -277,13 +428,13 @@ func TestQueueResolvesBlockersInOtherRepos(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			issues := []data.IssueData{blockedElsewhere, free}
-			stateQueries := serveGitHub(t, issues, tc.statesResponse)
-			m := new(NewModel(0, newTestContext(t, "me"), time.Now(), time.Now()))
+			queries := serveGitHub(t, issues, tc.statesResponse)
+			m := newQueueTab(newTestContext(t, "me"))
 
 			fetch(t, m)
 
 			require.Equal(t, tc.expected, stateTexts(m))
-			require.Equal(t, 1, *stateQueries)
+			require.Equal(t, 1, queries.states)
 		})
 	}
 }
@@ -291,28 +442,23 @@ func TestQueueResolvesBlockersInOtherRepos(t *testing.T) {
 func TestQueueWithoutBlockersInOtherReposSkipsTheStateQuery(t *testing.T) {
 	blockedHere := issue(2, "")
 	blockedHere.Body += "\n\n## Blocked by\n\n- #3\n"
-	stateQueries := serveGitHub(t, []data.IssueData{blockedHere, issue(3, "")}, answerState("OPEN"))
-	m := new(NewModel(0, newTestContext(t, "me"), time.Now(), time.Now()))
+	queries := serveGitHub(t, []data.IssueData{blockedHere, issue(3, "")}, answerState("OPEN"))
+	m := newQueueTab(newTestContext(t, "me"))
 
 	fetch(t, m)
 
 	require.Equal(t, []string{"🟢 Next", "🔴 Blocked by #3"}, stateTexts(m))
-	require.Zero(t, *stateQueries)
+	require.Zero(t, queries.states)
 }
 
 func TestQueueKeepsResolvedBlockersWhenOthersFail(t *testing.T) {
-	blockedBy := func(number int, blockers string) data.IssueData {
-		i := issue(number, "")
-		i.Body += "\n\n## Blocked by\n\n" + blockers + "\n"
-		return i
-	}
 	issues := []data.IssueData{
 		blockedBy(2, "- other/lib#1"),
 		blockedBy(3, "- other/lib#1"),
 		blockedBy(4, "- other/lib#2"),
 	}
 	var requested []string
-	stateQueries := serveGitHub(t, issues, func(w http.ResponseWriter, req *http.Request) {
+	queries := serveGitHub(t, issues, func(w http.ResponseWriter, req *http.Request) {
 		var body struct{ Variables map[string]any }
 		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
 		repos := map[string]any{}
@@ -334,27 +480,22 @@ func TestQueueKeepsResolvedBlockersWhenOthersFail(t *testing.T) {
 		}
 		writeJSON(t, w, map[string]any{"data": repos, "errors": errs})
 	})
-	m := new(NewModel(0, newTestContext(t, "me"), time.Now(), time.Now()))
+	m := newQueueTab(newTestContext(t, "me"))
 
 	fetch(t, m)
 
 	require.Equal(t, []string{"other/lib#1", "other/lib#2"}, requested)
-	require.Equal(t, 1, *stateQueries)
+	require.Equal(t, 1, queries.states)
 	require.Equal(t, []int{2, 3, 4}, rowNumbers(m))
 	require.Equal(t, []string{"🟢 Next", "🟢 Ready", "🔴 Blocked by other/lib#2"}, stateTexts(m))
 }
 
 func TestQueueLooksUpValidBlockersNextToAnOversizedNumber(t *testing.T) {
-	blockedBy := func(number int, blockers string) data.IssueData {
-		i := issue(number, "")
-		i.Body += "\n\n## Blocked by\n\n" + blockers + "\n"
-		return i
-	}
 	issues := []data.IssueData{
 		blockedBy(2, "- other/lib#99999999999"),
 		blockedBy(3, "- other/lib#1"),
 	}
-	stateQueries := serveGitHub(t, issues, func(w http.ResponseWriter, req *http.Request) {
+	queries := serveGitHub(t, issues, func(w http.ResponseWriter, req *http.Request) {
 		var body struct{ Variables map[string]any }
 		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
 		repos := map[string]any{}
@@ -371,11 +512,11 @@ func TestQueueLooksUpValidBlockersNextToAnOversizedNumber(t *testing.T) {
 		}
 		writeJSON(t, w, map[string]any{"data": repos})
 	})
-	m := new(NewModel(0, newTestContext(t, "me"), time.Now(), time.Now()))
+	m := newQueueTab(newTestContext(t, "me"))
 
 	fetch(t, m)
 
 	require.Equal(t, []int{3, 2}, rowNumbers(m))
 	require.Equal(t, []string{"🟢 Next", "🔴 Blocked by other/lib#99999999999"}, stateTexts(m))
-	require.Equal(t, 1, *stateQueries)
+	require.Equal(t, 1, queries.states)
 }

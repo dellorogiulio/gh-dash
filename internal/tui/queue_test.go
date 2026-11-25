@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/cli/go-gh/v2/pkg/repository"
 	"github.com/stretchr/testify/require"
 
@@ -19,7 +20,6 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issueview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/queuesection"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/sidebar"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tabs"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
@@ -97,7 +97,7 @@ func TestSwitchSelectedView_Cycle(t *testing.T) {
 	}
 }
 
-func queueIssue(number int, assignee string) data.IssueData {
+func queueIssue(number int, assignee string, labels ...string) data.IssueData {
 	i := data.IssueData{
 		Number:     number,
 		Title:      "an issue",
@@ -107,10 +107,13 @@ func queueIssue(number int, assignee string) data.IssueData {
 	if assignee != "" {
 		i.Assignees.Nodes = []data.Assignee{{Login: assignee}}
 	}
+	for _, l := range labels {
+		i.Labels.Nodes = append(i.Labels.Nodes, data.Label{Name: l})
+	}
 	return i
 }
 
-func newQueueTestModel(t *testing.T, startedTasks *[]string) Model {
+func newQueueTestModel(t *testing.T, startedTasks *[]string, issues ...data.IssueData) Model {
 	t.Helper()
 	cfg := parseTestConfig(t)
 	cfg.Keybindings.Issues = append(cfg.Keybindings.Issues, config.Keybinding{
@@ -129,13 +132,13 @@ func newQueueTestModel(t *testing.T, startedTasks *[]string) Model {
 		return nil
 	}
 
-	queueSection := queuesection.NewModel(0, m.ctx, time.Now(), time.Now())
-	queueSection.FetchNextPageSectionRows()
-	queueSection.Update(queuesection.SectionQueueFetchedMsg{
-		Issues: []data.IssueData{queueIssue(5, "me")},
-		TaskId: queueSection.LastFetch.TaskId,
+	m.queue = queuesection.InitSections(m.ctx)
+	queueTab := m.queue[0].(*queuesection.Model)
+	queueTab.FetchNextPageSectionRows()
+	queueTab.Update(queuesection.SectionQueueFetchedMsg{
+		Issues: issues,
+		TaskId: queueTab.LastFetch.TaskId,
 	})
-	m.queue = []section.Section{&queueSection}
 	m.sidebar.IsOpen = true
 	m.syncSidebar()
 	return m
@@ -153,7 +156,7 @@ func shellCommandOf(t *testing.T, cmd tea.Cmd) string {
 
 func TestQueueView_CustomIssueKeybinding(t *testing.T) {
 	var startedTasks []string
-	m := newQueueTestModel(t, &startedTasks)
+	m := newQueueTestModel(t, &startedTasks, queueIssue(5, "me"))
 
 	_, cmd := m.Update(tea.KeyPressMsg{Text: "e"})
 
@@ -179,7 +182,7 @@ func TestQueueView_IssueActions(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.key, func(t *testing.T) {
 			var startedTasks []string
-			m := newQueueTestModel(t, &startedTasks)
+			m := newQueueTestModel(t, &startedTasks, queueIssue(5, "me"))
 
 			m.Update(tea.KeyPressMsg{Text: tc.key})
 
@@ -264,7 +267,10 @@ func TestQueueView_IssueActionResultsReachQueueRow(t *testing.T) {
 			name: "label",
 			keys: []tea.KeyPressMsg{{Text: "L"}, {Text: "blocked"}, {Code: 'd', Mod: tea.ModCtrl}},
 			assert: func(t *testing.T, m Model) {
-				require.Zero(t, m.getCurrSection().NumRows())
+				require.Equal(t,
+					[]data.Label{{Name: "blocked"}},
+					currQueueIssue(t, m).Labels.Nodes,
+				)
 			},
 		},
 		{
@@ -305,7 +311,7 @@ func TestQueueView_IssueActionResultsReachQueueRow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stubGh(t)
 			var startedTasks []string
-			m := newQueueTestModel(t, &startedTasks)
+			m := newQueueTestModel(t, &startedTasks, queueIssue(5, "me"))
 
 			var cmd tea.Cmd
 			for _, key := range tc.keys {
@@ -318,14 +324,66 @@ func TestQueueView_IssueActionResultsReachQueueRow(t *testing.T) {
 	}
 }
 
-func TestQueueView_RefreshWithoutRepoShowsEmptyTab(t *testing.T) {
-	m := newViewTestModel(t, parseTestConfig(t), config.QueueView)
-	m.queue = queuesection.InitSections(m.ctx)
+func TestQueueView_RefreshWithoutRepoShowsEmptyTabs(t *testing.T) {
+	for _, currTab := range []int{0, 1} {
+		m := newViewTestModel(t, parseTestConfig(t), config.QueueView)
+		m.queue = queuesection.InitSections(m.ctx)
+		m.setCurrSectionId(currTab)
 
-	m.Update(tea.KeyPressMsg{Text: "r"})
+		m.Update(tea.KeyPressMsg{Text: "r"})
 
-	queueSection := m.queue[0].(*queuesection.Model)
-	require.False(t, queueSection.GetIsLoading())
-	require.False(t, queueSection.Table.IsLoading())
-	require.Zero(t, queueSection.NumRows())
+		require.Len(t, m.queue, 2)
+		for _, s := range m.queue {
+			tab := s.(*queuesection.Model)
+			require.False(t, tab.GetIsLoading())
+			require.False(t, tab.Table.IsLoading())
+			require.Zero(t, tab.NumRows())
+		}
+	}
+}
+
+func TestQueueView_IssueActionResultsReachNeedsMeRow(t *testing.T) {
+	stubGh(t)
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, queueIssue(5, "me", "blocked"))
+	m.setCurrSectionId(1)
+	m.syncSidebar()
+
+	var cmd tea.Cmd
+	for _, key := range []tea.KeyPressMsg{
+		{Text: "c"}, {Text: "on it"}, {Code: 'd', Mod: tea.ModCtrl},
+	} {
+		_, cmd = m.Update(key)
+	}
+	finished := taskFinishedFrom(t, cmd)
+	m.Update(finished)
+
+	require.Equal(t, 1, finished.SectionId)
+	comments := currQueueIssue(t, m).Comments.Nodes
+	require.Len(t, comments, 1)
+	require.Equal(t, "on it", comments[0].Body)
+}
+
+func TestQueueView_UnparkingAnIssueUpdatesBothTabs(t *testing.T) {
+	stubGh(t)
+	var startedTasks []string
+	m := newQueueTestModel(t, &startedTasks, queueIssue(5, "me", "blocked"), queueIssue(6, "me"))
+	m.setCurrSectionId(1)
+	m.syncSidebar()
+
+	var cmd tea.Cmd
+	for _, key := range []tea.KeyPressMsg{
+		{Text: "L"}, {Code: 'u', Mod: tea.ModCtrl}, {Text: "bug"}, {Code: 'd', Mod: tea.ModCtrl},
+	} {
+		_, cmd = m.Update(key)
+	}
+	m.Update(taskFinishedFrom(t, cmd))
+
+	require.Zero(t, m.queue[1].NumRows())
+	queueTab := m.queue[0].(*queuesection.Model)
+	states := []string{}
+	for _, row := range queueTab.Table.Rows {
+		states = append(states, ansi.Strip(row[0]))
+	}
+	require.Equal(t, []string{"🟢 Next", "🟢 Ready"}, states)
 }

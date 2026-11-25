@@ -2,7 +2,7 @@ package queuesection
 
 import (
 	"fmt"
-	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,37 +24,52 @@ import (
 
 const SectionType = "queue"
 
+// Model is one tab of the queue view. The tabs share one fetch of the open
+// issues and render from one analysis of them.
 type Model struct {
 	section.BaseModel
-	openIssues      []data.IssueData
-	otherRepoStates map[queue.Ref]string
-	entries         []queue.Entry
-	filteredFor     string
+	entriesOf func(queue.Analysis) []queue.Entry
+	shared    *shared
 }
 
-var stateColumnWidth = 24
+type shared struct {
+	tabs            []*Model
+	openIssues      []data.IssueData
+	otherRepoStates map[queue.Ref]string
+	analysis        queue.Analysis
+	analyzedFor     string
+}
 
-func NewModel(
+var (
+	stateColumnWidth    = 24
+	unblocksColumnWidth = 8
+)
+
+func newModel(
 	id int,
 	ctx *context.ProgramContext,
-	lastUpdated time.Time,
-	createdAt time.Time,
-) Model {
-	m := Model{}
+	cfg config.SectionConfig,
+	shared *shared,
+	entriesOf func(queue.Analysis) []queue.Entry,
+) *Model {
+	m := &Model{entriesOf: entriesOf, shared: shared}
 	m.BaseModel = section.NewModel(
 		ctx,
 		section.NewSectionOptions{
 			Id:     id,
-			Config: config.QueueSectionConfig(),
+			Config: cfg,
 			Type:   SectionType,
 			Columns: append(
-				[]table.Column{{Title: "State", Width: &stateColumnWidth}},
+				[]table.Column{
+					{Title: "State", Width: &stateColumnWidth},
+					{Title: "Unblocks", Width: &unblocksColumnWidth},
+				},
 				issuessection.GetSectionColumns(config.IssuesSectionConfig{}, ctx)...,
 			),
 			Singular:    m.GetItemSingularForm(),
 			Plural:      m.GetItemPluralForm(),
-			LastUpdated: lastUpdated,
-			CreatedAt:   createdAt,
+			LastUpdated: time.Now(),
+			CreatedAt:   time.Now(),
 		},
 	)
 	return m
@@ -101,10 +116,10 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 		}
 
 	case tasks.UpdateIssueMsg:
-		for i, currIssue := range m.openIssues {
+		for i, currIssue := range m.shared.openIssues {
 			if currIssue.Number == msg.IssueNumber {
-				m.openIssues[i] = msg.Apply(currIssue)
-				m.refilter()
+				m.shared.openIssues[i] = msg.Apply(currIssue)
+				m.shared.analyze(m.Ctx)
 				m.SetIsLoading(false)
 				break
 			}
@@ -112,12 +127,14 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 
 	case SectionQueueFetchedMsg:
 		if m.LastFetch.TaskId == msg.TaskId {
-			m.openIssues = msg.Issues
-			m.otherRepoStates = msg.OtherRepoStates
-			m.refilter()
-			m.PageInfo = &data.PageInfo{}
-			m.SetIsLoading(false)
-			m.UpdateLastUpdated(time.Now())
+			m.shared.openIssues = msg.Issues
+			m.shared.otherRepoStates = msg.OtherRepoStates
+			m.shared.analyze(m.Ctx)
+			for _, tab := range m.shared.tabs {
+				tab.PageInfo = &data.PageInfo{}
+				tab.SetIsLoading(false)
+				tab.UpdateLastUpdated(time.Now())
+			}
 		}
 	}
 
@@ -129,45 +146,48 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 
 	table, tableCmd := m.Table.Update(msg)
 	m.Table = table
-	m.Table.SetRows(m.BuildRows())
-	m.UpdateTotalItemsCount(m.GetTotalCount())
+	for _, tab := range m.shared.tabs {
+		tab.Table.SetRows(tab.BuildRows())
+		tab.UpdateTotalItemsCount(tab.GetTotalCount())
+	}
 
 	return m, tea.Batch(cmd, searchCmd, promptCmd, tableCmd)
 }
 
-func (m *Model) refilter() {
+func (s *shared) analyze(ctx *context.ProgramContext) {
 	owner, name := "", ""
-	if m.Ctx.HasGHRepo() {
-		owner, name = m.Ctx.GHRepo.Owner, m.Ctx.GHRepo.Name
+	if ctx.HasGHRepo() {
+		owner, name = ctx.GHRepo.Owner, ctx.GHRepo.Name
 	}
-	analysis := queue.Analyze(m.openIssues, m.Ctx.User, m.otherRepoStates, owner, name)
-	m.entries = slices.DeleteFunc(analysis.Queue, func(e queue.Entry) bool {
-		return e.State == queue.Parked
-	})
-	m.filteredFor = m.Ctx.User
+	s.analysis = queue.Analyze(s.openIssues, ctx.User, s.otherRepoStates, owner, name)
+	s.analyzedFor = ctx.User
 }
 
-// The login is fetched in parallel with the issues, so candidates are
-// recomputed once it arrives.
-func (m *Model) queueEntries() []queue.Entry {
-	if m.filteredFor != m.Ctx.User {
-		m.refilter()
+// The login is fetched in parallel with the issues, so the analysis is redone
+// once it arrives.
+func (m *Model) entries() []queue.Entry {
+	if m.shared.analyzedFor != m.Ctx.User {
+		m.shared.analyze(m.Ctx)
 	}
-	return m.entries
+	return m.entriesOf(m.shared.analysis)
 }
 
 func (m *Model) BuildRows() []table.Row {
 	rows := []table.Row{}
 	currItem := m.Table.GetCurrItem()
-	for i, entry := range m.queueEntries() {
+	for i, entry := range m.entries() {
 		issueModel := issuerow.Issue{
 			Ctx:            m.Ctx,
 			Data:           entry.Issue,
 			ShowAuthorIcon: m.ShowAuthorIcon,
-			Columns:        m.Table.Columns[1:],
+			Columns:        m.Table.Columns[2:],
 		}
-		state := components.GetIssueTextStyle(m.Ctx).Render(stateText(entry))
-		rows = append(rows, append(table.Row{state}, issueModel.ToTableRow(currItem == i)...))
+		style := components.GetIssueTextStyle(m.Ctx)
+		row := table.Row{
+			style.Render(stateText(entry)),
+			style.Render(strconv.Itoa(entry.Unblocks)),
+		}
+		rows = append(rows, append(row, issueModel.ToTableRow(currItem == i)...))
 	}
 	return rows
 }
@@ -178,21 +198,38 @@ func stateText(entry queue.Entry) string {
 		return "🟢 Next"
 	case queue.Ready:
 		return "🟢 Ready"
+	case queue.Parked:
+		return "🟠 Parked"
+	case queue.HITL:
+		return "🟣 HITL"
 	default:
 		blockers := []string{}
-		for _, ref := range entry.OpenBlockers() {
-			blockers = append(blockers, ref.String())
+		for _, b := range entry.Blockers {
+			if b.Open {
+				blockers = append(blockers, blockerText(b))
+			}
 		}
 		return "🔴 Blocked by " + strings.Join(blockers, ", ")
 	}
 }
 
+func blockerText(b queue.Blocker) string {
+	switch {
+	case b.HITL:
+		return b.String() + " (HITL)"
+	case b.Parked:
+		return b.String() + " (parked)"
+	default:
+		return b.String()
+	}
+}
+
 func (m *Model) NumRows() int {
-	return len(m.queueEntries())
+	return len(m.entries())
 }
 
 func (m *Model) GetCurrRow() data.RowData {
-	entries := m.queueEntries()
+	entries := m.entries()
 	idx := m.Table.GetCurrItem()
 	if idx < 0 || idx >= len(entries) {
 		return nil
@@ -216,9 +253,7 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 	}
 
 	owner, name := m.Ctx.GHRepo.Owner, m.Ctx.GHRepo.Name
-	taskId := fmt.Sprintf("fetching_queue_%d_%s", m.Id, time.Now().String())
-	m.LastFetch.TaskId = taskId
-	m.LastFetch.At = time.Now()
+	taskId := fmt.Sprintf("fetching_queue_%s", time.Now().String())
 	startCmd := m.Ctx.StartTask(context.Task{
 		Id:           taskId,
 		StartText:    fmt.Sprintf("Fetching open issues of %s/%s", owner, name),
@@ -254,7 +289,13 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 		}
 	}
 
-	return []tea.Cmd{startCmd, fetchCmd, m.SetIsLoading(true)}
+	cmds := []tea.Cmd{startCmd, fetchCmd}
+	for _, tab := range m.shared.tabs {
+		tab.LastFetch.TaskId = taskId
+		tab.LastFetch.At = time.Now()
+		cmds = append(cmds, tab.SetIsLoading(true))
+	}
+	return cmds
 }
 
 func (m *Model) UpdateLastUpdated(t time.Time) {
@@ -262,24 +303,37 @@ func (m *Model) UpdateLastUpdated(t time.Time) {
 }
 
 func (m *Model) ResetRows() {
-	m.openIssues = nil
-	m.refilter()
-	m.BaseModel.ResetRows()
+	m.shared.openIssues = nil
+	m.shared.analyze(m.Ctx)
+	for _, tab := range m.shared.tabs {
+		tab.BaseModel.ResetRows()
+	}
 }
 
 func InitSections(ctx *context.ProgramContext) []section.Section {
-	return []section.Section{new(NewModel(0, ctx, time.Now(), time.Now()))}
+	s := &shared{}
+	s.tabs = []*Model{
+		newModel(0, ctx, config.QueueSectionConfig(), s, func(a queue.Analysis) []queue.Entry {
+			return a.Queue
+		}),
+		newModel(1, ctx, config.NeedsMeSectionConfig(), s, func(a queue.Analysis) []queue.Entry {
+			return a.NeedsMe
+		}),
+	}
+	return []section.Section{s.tabs[0], s.tabs[1]}
 }
 
 func FetchAllSections(ctx *context.ProgramContext, existing []section.Section) tea.Cmd {
-	fetchCmds := make([]tea.Cmd, 0)
-	for _, queueSection := range section.ToImplSections[*Model](existing) {
-		queueSection.SetLastUpdated(time.Now())
-		queueSection.SetCreatedAt(time.Now())
-		queueSection.PageInfo = nil
-		fetchCmds = append(fetchCmds, queueSection.FetchNextPageSectionRows()...)
+	tabs := section.ToImplSections[*Model](existing)
+	if len(tabs) == 0 {
+		return nil
 	}
-	return tea.Batch(fetchCmds...)
+	for _, tab := range tabs {
+		tab.SetLastUpdated(time.Now())
+		tab.SetCreatedAt(time.Now())
+		tab.PageInfo = nil
+	}
+	return tea.Batch(tabs[0].FetchNextPageSectionRows()...)
 }
 
 type SectionQueueFetchedMsg struct {
@@ -297,7 +351,7 @@ func (m Model) GetItemPluralForm() string {
 }
 
 func (m *Model) GetTotalCount() int {
-	return len(m.queueEntries())
+	return len(m.entries())
 }
 
 func (m *Model) GetPagerContent() string {
